@@ -4,7 +4,23 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>COUNTER STRIKE 3</title>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+window.THREE = THREE;
+window.GLTFLoader = GLTFLoader;
+window.SkeletonUtils = SkeletonUtils;
+window.dispatchEvent(new Event('three-ready'));
+</script>
 <style>
 :root {
   --bg:#0b0e14;--panel:#121722;--panel2:#1a2230;--border:#2a3548;--text:#e8edf5;--muted:#8b97ab;
@@ -932,7 +948,13 @@ input{font-family:inherit}
 <div class="toast" id="toast"></div>
 </div>
 <script>
-
+function bootCS3(){
+if(window.__cs3Booted) return;
+if(typeof THREE==='undefined' || !window.GLTFLoader || !window.SkeletonUtils){
+  window.addEventListener('three-ready', bootCS3, {once:true});
+  return;
+}
+window.__cs3Booted = true;
 (function () {
   'use strict';
   let LobbyPreview = null;
@@ -2292,72 +2314,146 @@ input{font-family:inherit}
 
   // Realistic portrait images for heads (no beige square plates)
   const FACE_IMGS = { ct:null, t:null, ready:false };
+  // CS2 Phoenix Connection turnaround (side | front | back) for T-side body/head
+  const PHOENIX_IMG = { img:null, ready:false };
   function loadFaceImages(done){
-    let left=2;
+    let left=3;
+    const finish=()=>{ if(--left<=0){ FACE_IMGS.ready=true; PHOENIX_IMG.ready=true; if(done)done(); } };
     [['ct','assets/face-ct.png'],['t','assets/face-t.png']].forEach(([k,src])=>{
       const img=new Image();
       img.crossOrigin='anonymous';
-      img.onload=()=>{ FACE_IMGS[k]=img; if(--left<=0){ FACE_IMGS.ready=true; if(done)done(); } };
-      img.onerror=()=>{ FACE_IMGS[k]=null; if(--left<=0){ FACE_IMGS.ready=true; if(done)done(); } };
+      img.onload=()=>{ FACE_IMGS[k]=img; finish(); };
+      img.onerror=()=>{ FACE_IMGS[k]=null; finish(); };
       img.src=src;
     });
+    const ph=new Image();
+    ph.crossOrigin='anonymous';
+    ph.onload=()=>{ PHOENIX_IMG.img=ph; finish(); };
+    ph.onerror=()=>{ PHOENIX_IMG.img=null; finish(); };
+    ph.src='assets/phoenix-t.png';
+  }
+  /** Crop a region of the Phoenix turnaround into a CanvasTexture. Norms are 0–1 of source image. */
+  function cropPhoenixTexture(nx, ny, nw, nh, size){
+    size=size||512;
+    const c=document.createElement('canvas'); c.width=size; c.height=size;
+    const ctx=c.getContext('2d');
+    ctx.fillStyle='#3a3428'; ctx.fillRect(0,0,size,size);
+    const img=PHOENIX_IMG.img;
+    if(img&&img.naturalWidth){
+      const sx=img.naturalWidth*nx, sy=img.naturalHeight*ny;
+      const sw=img.naturalWidth*nw, sh=img.naturalHeight*nh;
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, size, size);
+    }
+    const tex=new THREE.CanvasTexture(c);
+    if(THREE.SRGBColorSpace) tex.colorSpace=THREE.SRGBColorSpace;
+    tex.anisotropy=8;
+    return tex;
+  }
+  function makePhoenixHeadTexture(){
+    // Front view head only (balaclava) — figure x≈0.36–0.49, head y≈0.08–0.30
+    const c=document.createElement('canvas'); c.width=512; c.height=512;
+    const ctx=c.getContext('2d');
+    // olive balaclava base so sphere sides/back aren't empty
+    const g=ctx.createRadialGradient(256,220,40,256,256,320);
+    g.addColorStop(0,'#4a4538'); g.addColorStop(0.55,'#2e2a22'); g.addColorStop(1,'#1a1814');
+    ctx.fillStyle=g; ctx.fillRect(0,0,512,512);
+    const img=PHOENIX_IMG.img;
+    if(img&&img.naturalWidth){
+      const sx=img.naturalWidth*0.358, sy=img.naturalHeight*0.075;
+      const sw=img.naturalWidth*0.133, sh=img.naturalHeight*0.235;
+      ctx.drawImage(img, sx, sy, sw, sh, 96, 70, 320, 340);
+      // darken edges for sphere wrap
+      const vg=ctx.createRadialGradient(256,240,90,256,256,280);
+      vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(0.65,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(18,16,12,0.75)');
+      ctx.fillStyle=vg; ctx.fillRect(0,0,512,512);
+    } else {
+      paintHeadCanvas(ctx, 512, 512, FACE_IMGS.t, 'T');
+    }
+    const tex=new THREE.CanvasTexture(c);
+    if(THREE.SRGBColorSpace) tex.colorSpace=THREE.SRGBColorSpace;
+    tex.anisotropy=8;
+    return tex;
+  }
+  function makePhoenixVestTexture(){
+    // Front torso / plate carrier
+    return cropPhoenixTexture(0.370, 0.300, 0.110, 0.310, 512);
+  }
+  function makePhoenixPantsTexture(){
+    // Front legs / camo cargo
+    return cropPhoenixTexture(0.368, 0.550, 0.112, 0.400, 512);
+  }
+  function makePhoenixSideTexture(){
+    // Left profile — shoulder / side panel
+    return cropPhoenixTexture(0.095, 0.070, 0.115, 0.890, 512);
   }
   function paintHeadCanvas(ctx, W, H, portrait, team){
-    // Full sphere unwrap: hair + skin, portrait in eye window only, lower face masked
-    const skin = team==='CT' ? '#c9a88a' : '#b8956e';
-    const hair = team==='CT' ? '#2a2420' : '#1a1512';
-    const mask = team==='CT' ? '#1a2838' : '#2a2218';
+    // CS2-style head unwrap: skin, hair, eye window with portrait, tactical lower mask
+    const skin = team==='CT' ? '#d2aa88' : '#c49a72';
+    const skinShade = team==='CT' ? '#a87858' : '#9a7050';
+    const hair = team==='CT' ? '#1e1a16' : '#14100e';
+    const mask = team==='CT' ? '#1a2838' : '#221c16';
     const g=ctx.createLinearGradient(0,0,0,H);
-    g.addColorStop(0, hair); g.addColorStop(0.22, hair); g.addColorStop(0.34, skin); g.addColorStop(1, '#6a4a38');
+    g.addColorStop(0, hair); g.addColorStop(0.2, hair); g.addColorStop(0.32, skin); g.addColorStop(0.7, skinShade); g.addColorStop(1, '#5a3a28');
     ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    // subtle skin pores / noise
+    for(let i=0;i<1800;i++){
+      ctx.fillStyle=`rgba(80,40,20,${0.02+Math.random()*0.05})`;
+      ctx.fillRect(Math.random()*W, H*0.28+Math.random()*H*0.5, 1, 1);
+    }
     // ear / side shadow bands
-    ctx.fillStyle='rgba(0,0,0,0.28)';
-    ctx.fillRect(0, H*0.28, W*0.2, H*0.52);
-    ctx.fillRect(W*0.8, H*0.28, W*0.2, H*0.52);
-    // eye / brow window only (tight crop — not full open face)
-    const cx=W*0.5, cy=H*0.46, rx=W*0.18, ry=H*0.14;
+    ctx.fillStyle='rgba(0,0,0,0.32)';
+    ctx.fillRect(0, H*0.26, W*0.18, H*0.55);
+    ctx.fillRect(W*0.82, H*0.26, W*0.18, H*0.55);
+    // wider eye window for more readable face
+    const cx=W*0.5, cy=H*0.44, rx=W*0.22, ry=H*0.16;
     ctx.save();
     ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); ctx.clip();
     if(portrait && portrait.naturalWidth){
-      // focus on upper face / eyes
-      const scale=Math.max((rx*2.6)/portrait.width, (ry*2.8)/portrait.height);
+      const scale=Math.max((rx*2.8)/portrait.width, (ry*3.0)/portrait.height);
       const dw=portrait.width*scale, dh=portrait.height*scale;
-      ctx.drawImage(portrait, cx-dw/2, cy-dh*0.38, dw, dh);
+      ctx.drawImage(portrait, cx-dw/2, cy-dh*0.4, dw, dh);
+      // slight color grade
+      ctx.fillStyle='rgba(40,25,15,0.12)';
+      ctx.fillRect(cx-rx, cy-ry, rx*2, ry*2);
     } else {
       ctx.fillStyle=skin; ctx.fillRect(cx-rx, cy-ry, rx*2, ry*2);
+      // simple eyes
+      ctx.fillStyle='#1a120e';
+      ctx.beginPath(); ctx.ellipse(cx-rx*0.35, cy, rx*0.12, ry*0.18, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(cx+rx*0.35, cy, rx*0.12, ry*0.18, 0, 0, Math.PI*2); ctx.fill();
     }
     ctx.restore();
-    // soft edge around eye window
-    const rg=ctx.createRadialGradient(cx,cy, rx*0.4, cx,cy, rx*1.25);
+    // soft vignette around eyes
+    const rg=ctx.createRadialGradient(cx,cy, rx*0.35, cx,cy, rx*1.35);
     rg.addColorStop(0,'rgba(0,0,0,0)');
-    rg.addColorStop(0.65,'rgba(0,0,0,0)');
-    rg.addColorStop(1,'rgba(20,16,14,0.55)');
+    rg.addColorStop(0.7,'rgba(0,0,0,0)');
+    rg.addColorStop(1,'rgba(18,14,12,0.6)');
     ctx.fillStyle=rg;
-    ctx.beginPath(); ctx.ellipse(cx, cy, rx*1.35, ry*1.45, 0, 0, Math.PI*2); ctx.fill();
-    // balaclava / lower-face mask covering mouth & chin
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx*1.4, ry*1.5, 0, 0, Math.PI*2); ctx.fill();
+    // balaclava / mandible fabric
     ctx.fillStyle=mask;
     ctx.beginPath();
-    ctx.moveTo(cx-rx*1.55, cy+ry*0.35);
-    ctx.quadraticCurveTo(cx, cy+ry*0.15, cx+rx*1.55, cy+ry*0.35);
-    ctx.lineTo(cx+rx*1.7, cy+ry*2.4);
-    ctx.quadraticCurveTo(cx, cy+ry*2.85, cx-rx*1.7, cy+ry*2.4);
+    ctx.moveTo(cx-rx*1.6, cy+ry*0.25);
+    ctx.quadraticCurveTo(cx, cy+ry*0.05, cx+rx*1.6, cy+ry*0.25);
+    ctx.lineTo(cx+rx*1.75, cy+ry*2.5);
+    ctx.quadraticCurveTo(cx, cy+ry*2.95, cx-rx*1.75, cy+ry*2.5);
     ctx.closePath();
     ctx.fill();
-    // fabric folds
-    ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.lineWidth=2;
-    for(let i=0;i<4;i++){
-      const yy=cy+ry*(0.7+i*0.35);
-      ctx.beginPath(); ctx.moveTo(cx-rx*1.2, yy); ctx.quadraticCurveTo(cx, yy+6, cx+rx*1.2, yy); ctx.stroke();
+    ctx.strokeStyle='rgba(0,0,0,0.28)'; ctx.lineWidth=2;
+    for(let i=0;i<5;i++){
+      const yy=cy+ry*(0.65+i*0.32);
+      ctx.beginPath(); ctx.moveTo(cx-rx*1.25, yy); ctx.quadraticCurveTo(cx, yy+5, cx+rx*1.25, yy); ctx.stroke();
     }
-    // cheek straps
-    ctx.fillStyle='rgba(0,0,0,0.35)';
-    ctx.fillRect(cx-rx*1.65, cy-ry*0.1, rx*0.35, ry*1.6);
-    ctx.fillRect(cx+rx*1.3, cy-ry*0.1, rx*0.35, ry*1.6);
-    // helmet rim shadow over forehead
-    ctx.fillStyle='rgba(0,0,0,0.4)';
-    ctx.beginPath(); ctx.ellipse(cx, cy-ry*1.15, rx*1.5, ry*0.55, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,0.38)';
+    ctx.fillRect(cx-rx*1.7, cy-ry*0.15, rx*0.38, ry*1.7);
+    ctx.fillRect(cx+rx*1.32, cy-ry*0.15, rx*0.38, ry*1.7);
+    ctx.fillStyle='rgba(0,0,0,0.45)';
+    ctx.beginPath(); ctx.ellipse(cx, cy-ry*1.2, rx*1.55, ry*0.5, 0, 0, Math.PI*2); ctx.fill();
   }
   function makeHeadTexture(team, portraitImg){
+    if(team==='T' && PHOENIX_IMG.img){
+      return makePhoenixHeadTexture();
+    }
     const c=document.createElement('canvas'); c.width=512; c.height=512;
     paintHeadCanvas(c.getContext('2d'), 512, 512, portraitImg||FACE_IMGS[team==='CT'?'ct':'t'], team);
     const tex=new THREE.CanvasTexture(c);
@@ -2366,160 +2462,696 @@ input{font-family:inherit}
     return tex;
   }
   function makeBotFace(team){
-    return makeHeadTexture(team==='CT'?'CT':'T', FACE_IMGS[team==='CT'?'ct':'t']);
+    if(team==='T') return makeHeadTexture('T', FACE_IMGS.t);
+    return makeHeadTexture('CT', FACE_IMGS.ct);
   }
+
+
+  // ===== GLB HUMANOID CHARACTERS (Mixamo Soldier) =====
+  function findBoneByNames(root, names){
+    let found=null;
+    root.traverse(o=>{
+      if(found||!o.name) return;
+      if(names.indexOf(o.name)>=0) found=o;
+    });
+    return found;
+  }
+  function quatVals(eulerXYZList){
+    const out=[];
+    for(let i=0;i<eulerXYZList.length;i++){
+      const e=eulerXYZList[i];
+      const q=new THREE.Quaternion().setFromEuler(new THREE.Euler(e[0],e[1],e[2],'XYZ'));
+      out.push(q.x,q.y,q.z,q.w);
+    }
+    return out;
+  }
+  function makeSyntheticCombatClips(root){
+    const spine=findBoneByNames(root,['mixamorig:Spine2','mixamorig:Spine1','mixamorig:Spine','Spine2','Spine']);
+    const hips=findBoneByNames(root,['mixamorig:Hips','Hips']);
+    const rArm=findBoneByNames(root,['mixamorig:RightArm','RightArm','mixamorig:RightShoulder']);
+    const lArm=findBoneByNames(root,['mixamorig:LeftArm','LeftArm','mixamorig:LeftShoulder']);
+    const rFore=findBoneByNames(root,['mixamorig:RightForeArm','RightForeArm']);
+    const lFore=findBoneByNames(root,['mixamorig:LeftForeArm','LeftForeArm']);
+    const clips=[];
+    const idQ=[0,0,0,1];
+    // Always create combat clips; use identity tracks on root if bones missing
+    const spineName=spine?spine.name:(hips?hips.name:null);
+    const rName=rArm?rArm.name:null;
+    const lName=lArm?lArm.name:null;
+    if(spineName&&rName&&lName){
+      clips.push(new THREE.AnimationClip('AimIdle', 1.0, [
+        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,1], quatVals([[0.08,0,0],[0.1,0,0]])),
+        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,1], quatVals([[1.15,-0.15,0.2],[1.2,-0.12,0.22]])),
+        new THREE.QuaternionKeyframeTrack(lName+'.quaternion', [0,1], quatVals([[1.05,0.25,-0.15],[1.1,0.22,-0.12]]))
+      ]));
+      const shootTracks=[
+        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,0.07,0.28], quatVals([[0.08,0,0],[-0.12,0.04,0.06],[0.08,0,0]])),
+        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,0.07,0.28], quatVals([[1.15,-0.15,0.2],[0.95,-0.05,0.35],[1.15,-0.15,0.2]]))
+      ];
+      if(rFore) shootTracks.push(new THREE.QuaternionKeyframeTrack(rFore.name+'.quaternion', [0,0.07,0.28], quatVals([[0.2,0,0],[0.45,0,0],[0.2,0,0]])));
+      clips.push(new THREE.AnimationClip('Shoot', 0.28, shootTracks));
+      const reloadTracks=[
+        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,0.35,0.9,1.6], quatVals([[1.15,-0.15,0.2],[0.6,0.4,0.5],[0.5,-0.3,0.8],[1.15,-0.15,0.2]])),
+        new THREE.QuaternionKeyframeTrack(lName+'.quaternion', [0,0.4,1.0,1.6], quatVals([[1.05,0.25,-0.15],[0.7,-0.5,0.3],[0.55,-0.2,0.55],[1.05,0.25,-0.15]]))
+      ];
+      if(lFore) reloadTracks.push(new THREE.QuaternionKeyframeTrack(lFore.name+'.quaternion', [0,0.45,1.1,1.6], quatVals([[0.15,0,0],[0.9,0.2,0],[0.6,0,0],[0.15,0,0]])));
+      clips.push(new THREE.AnimationClip('Reload', 1.6, reloadTracks));
+    } else {
+      // Fallback: subtle root pitch so states still exist
+      clips.push(new THREE.AnimationClip('AimIdle', 1.0, [
+        new THREE.QuaternionKeyframeTrack('.quaternion', [0,1], idQ.concat(idQ))
+      ]));
+      clips.push(new THREE.AnimationClip('Shoot', 0.25, [
+        new THREE.VectorKeyframeTrack('.position', [0,0.08,0.25], [0,0,0, 0,0.02,0.03, 0,0,0])
+      ]));
+      clips.push(new THREE.AnimationClip('Reload', 1.2, [
+        new THREE.VectorKeyframeTrack('.position', [0,0.4,1.2], [0,0,0, 0,0.04,0, 0,0,0])
+      ]));
+    }
+    if(hips){
+      const pos0=hips.position.clone();
+      clips.push(new THREE.AnimationClip('Death', 1.35, [
+        new THREE.QuaternionKeyframeTrack(hips.name+'.quaternion', [0,0.35,0.85,1.35], quatVals([[0,0,0],[0.4,0.6,0.2],[1.2,0.9,0.1],[1.45,1.1,0]])),
+        new THREE.VectorKeyframeTrack(hips.name+'.position', [0,0.5,1.35], [
+          pos0.x,pos0.y,pos0.z,
+          pos0.x,pos0.y*0.55,pos0.z+0.15,
+          pos0.x,0.05,pos0.z+0.35
+        ])
+      ]));
+    } else {
+      clips.push(new THREE.AnimationClip('Death', 1.0, [
+        new THREE.VectorKeyframeTrack('.position', [0,0.5,1.0], [0,0,0, 0,-0.4,0.2, 0,-0.85,0.35])
+      ]));
+    }
+    return clips;
+  }
+  function makeSimpleRifleMesh(){
+    return buildWorldWeaponMesh('ak');
+  }
+  /** Distinct 3P weapon silhouettes (CS-readable from distance). */
+  function buildWorldWeaponMesh(weaponId, colorHex){
+    const id=weaponId||'ak';
+    const g=new THREE.Group();
+    g.name='worldWeapon_'+id;
+    const baseCol=colorHex?new THREE.Color(colorHex):new THREE.Color(0x3a4048);
+    const mat=new THREE.MeshStandardMaterial({color:baseCol, metalness:0.55, roughness:0.38});
+    const dark=new THREE.MeshStandardMaterial({color:0x121418, metalness:0.75, roughness:0.28});
+    const steel=new THREE.MeshStandardMaterial({color:0x6a727c, metalness:0.85, roughness:0.22});
+    const wood=new THREE.MeshStandardMaterial({color:0x5a4030, metalness:0.1, roughness:0.75});
+    const add=(mesh,x,y,z,rx,ry,rz)=>{ mesh.position.set(x||0,y||0,z||0); if(rx||ry||rz) mesh.rotation.set(rx||0,ry||0,rz||0); g.add(mesh); return mesh; };
+    if(id==='knife'){
+      const blade=new THREE.Mesh(new THREE.BoxGeometry(0.02,0.008,0.22), steel);
+      add(blade,0,0.01,0.12);
+      const tip=new THREE.Mesh(new THREE.ConeGeometry(0.012,0.06,6), steel);
+      tip.rotation.x=Math.PI/2; add(tip,0,0.01,0.26);
+      const handle=new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.014,0.1,8), dark);
+      handle.rotation.x=Math.PI/2; add(handle,0,0,-0.02);
+      const guard=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.02,0.015), steel);
+      add(guard,0,0.01,0.04);
+    } else if(id==='pistol'||id==='usps'||id==='deagle'){
+      const thick=id==='deagle'?0.07:0.055;
+      const len=id==='deagle'?0.22:0.18;
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.04,thick*0.7,len), mat), 0,0.02,0.06);
+      const slide=new THREE.Mesh(new THREE.BoxGeometry(0.038,0.03,len*0.85), dark);
+      add(slide,0,0.045,0.07);
+      const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.011,0.08,8), steel);
+      barrel.rotation.x=Math.PI/2; add(barrel,0,0.03,0.16);
+      const grip=new THREE.Mesh(new THREE.BoxGeometry(0.035,0.1,0.05), dark);
+      add(grip,0,-0.04,-0.02, 0.35,0,0);
+      if(id==='usps'){
+        const sil=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.016,0.1,8), dark);
+        sil.rotation.x=Math.PI/2; add(sil,0,0.03,0.22);
+      }
+    } else if(id==='awp'){
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.07,0.09,0.55), mat), 0,0.02,0.08);
+      const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.016,0.02,0.42,8), dark);
+      barrel.rotation.x=Math.PI/2; add(barrel,0,0.03,0.48);
+      const scope=new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.028,0.16,10), dark);
+      scope.rotation.x=Math.PI/2; add(scope,0,0.1,0.05);
+      const stock=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.08,0.2), wood);
+      add(stock,0,0.0,-0.28);
+      const mag=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.1,0.06), dark);
+      add(mag,0,-0.06,0.0);
+    } else if(id==='nova'||id==='xm'||id==='mag7'){
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.06,0.08,0.4), mat), 0,0.02,0.05);
+      const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.024,0.36,8), dark);
+      barrel.rotation.x=Math.PI/2; add(barrel,0,0.025,0.4);
+      const stock=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.07,0.18), wood);
+      add(stock,0,0.0,-0.26);
+      if(id==='xm'){
+        const pump=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.05,0.12), dark);
+        add(pump,0,-0.02,0.18);
+      }
+    } else if(id==='mac10'||id==='mp9'||id==='ump'){
+      const bodyLen=id==='ump'?0.32:0.26;
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.055,0.09,bodyLen), mat), 0,0.02,0.04);
+      const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.014,0.16,8), dark);
+      barrel.rotation.x=Math.PI/2; add(barrel,0,0.03,0.28);
+      const mag=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.14,0.05), dark);
+      add(mag,0,-0.08,0.02);
+      if(id==='ump'){
+        const stock=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.05,0.14), dark);
+        add(stock,0,0.02,-0.2);
+      }
+    } else {
+      // rifles: ak / galil / m4
+      const isAk=id==='ak'||id==='galil';
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.06,0.085,0.42), isAk?wood:mat), 0,0.02,0.05);
+      const hg=new THREE.Mesh(new THREE.BoxGeometry(0.055,0.07,0.16), dark);
+      add(hg,0,0.015,0.28);
+      const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.015,0.28,8), steel);
+      barrel.rotation.x=Math.PI/2; add(barrel,0,0.025,0.48);
+      const stock=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.07,0.18), isAk?wood:mat);
+      add(stock,0,0.0,-0.26);
+      const mag=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.14,0.055), dark);
+      add(mag,0,-0.08,0.0, 0,0, isAk?-0.2:0);
+      if(!isAk){
+        const carry=new THREE.Mesh(new THREE.BoxGeometry(0.02,0.04,0.12), dark);
+        add(carry,0,0.07,0.08);
+      }
+    }
+    g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; }});
+    // Hand-socket rest pose (point barrel roughly +Z of character after bone attach)
+    g.rotation.set(-Math.PI*0.5, 0, Math.PI*0.05);
+    g.position.set(0, -0.02, 0.08);
+    return g;
+  }
+  function applyGloveTint(root, hex){
+    if(!root||hex==null) return;
+    const col=new THREE.Color(hex);
+    const handNames=['mixamorig:LeftHand','mixamorig:RightHand','mixamorig:LeftHandThumb1','mixamorig:RightHandThumb1',
+      'mixamorig:LeftForeArm','mixamorig:RightForeArm'];
+    const nameSet={};
+    handNames.forEach(n=>nameSet[n]=true);
+    root.traverse(o=>{
+      if(!o.isMesh||!o.material) return;
+      // tint meshes parented under hand/forearm bones
+      let p=o.parent, hit=false;
+      while(p){
+        if(p.name&&(nameSet[p.name]||/Hand|ForeArm|finger|Finger/i.test(p.name))){ hit=true; break; }
+        p=p.parent;
+      }
+      if(!hit) return;
+      const mats=Array.isArray(o.material)?o.material:[o.material];
+      mats.forEach(m=>{
+        if(m&&m.color){ m.color.lerp(col, 0.55); m.needsUpdate=true; }
+      });
+    });
+  }
+
+  function CharacterAnim(root, gltfAnimations){
+    this.root=root;
+    this.mixer=new THREE.AnimationMixer(root);
+    this.actions={};
+    this.state='idle';
+    this.locked=false;
+    this._fade=0.2;
+    const byName={};
+    (gltfAnimations||[]).forEach(c=>{ if(c&&c.name) byName[c.name]=c; });
+    makeSyntheticCombatClips(root).forEach(c=>{ byName[c.name]=c; });
+    const map={
+      idle:['Idle','idle'],
+      walk:['Walk','walk'],
+      run:['Run','run'],
+      aim:['AimIdle','RifleIdle','Idle','idle'],
+      shoot:['Shoot','Fire'],
+      reload:['Reload'],
+      death:['Death','die']
+    };
+    Object.keys(map).forEach(key=>{
+      let clip=null;
+      for(let i=0;i<map[key].length;i++){
+        if(byName[map[key][i]]){ clip=byName[map[key][i]]; break; }
+      }
+      if(!clip) return;
+      const action=this.mixer.clipAction(clip);
+      if(key==='shoot'||key==='reload'||key==='death'){
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished=true;
+      }
+      this.actions[key]=action;
+    });
+    const self=this;
+    this._onFinished=function(e){
+      const name=e.action&&e.action.getClip()?e.action.getClip().name:'';
+      if(name==='Shoot'||name==='Fire'){
+        self.locked=false;
+        self.setState(self._afterShoot||'aim');
+      } else if(name==='Reload'){
+        self.locked=false;
+        self.setState(self._afterReload||'idle');
+      } else if(name==='Death'||name==='die'){
+        self.locked=true;
+        if(self.onDeathEnd) self.onDeathEnd();
+      }
+    };
+    this.mixer.addEventListener('finished', this._onFinished);
+    if(this.actions.idle){
+      this.actions.idle.reset().fadeIn(0.01).play();
+      this.state='idle';
+    }
+  }
+  CharacterAnim.prototype.setState=function(state){
+    if(this.locked && state!=='death') return;
+    if(state===this.state) return;
+    if(!this.actions[state]) state='idle';
+    if(!this.actions[state]) return;
+    const prev=this.actions[this.state];
+    const next=this.actions[state];
+    if(prev&&prev!==next) prev.fadeOut(this._fade);
+    next.reset().setEffectiveWeight(1).fadeIn(this._fade).play();
+    this.state=state;
+  };
+  CharacterAnim.prototype.playOneShot=function(name, afterState){
+    const action=this.actions[name];
+    if(!action) return false;
+    if(name==='death'){
+      this.locked=true;
+      Object.keys(this.actions).forEach(k=>{ if(k!=='death'&&this.actions[k]) this.actions[k].fadeOut(0.1); });
+      action.reset().fadeIn(0.08).play();
+      this.state='death';
+      return true;
+    }
+    if(this.locked) return false;
+    this.locked=true;
+    if(name==='shoot') this._afterShoot=afterState||(this.state==='walk'||this.state==='run'?this.state:'aim');
+    if(name==='reload') this._afterReload=afterState||'idle';
+    const prev=this.actions[this.state];
+    if(prev&&prev!==action) prev.fadeOut(0.08);
+    action.reset().fadeIn(0.06).play();
+    this.state=name;
+    return true;
+  };
+  CharacterAnim.prototype.update=function(dt){
+    if(this.mixer) this.mixer.update(dt);
+  };
+  CharacterAnim.prototype.resetToIdle=function(){
+    this.locked=false;
+    this.onDeathEnd=null;
+    Object.keys(this.actions).forEach(k=>{ const a=this.actions[k]; if(a){ a.stop(); a.reset(); }});
+    if(this.actions.idle){ this.actions.idle.fadeIn(0.05).play(); this.state='idle'; }
+  };
+
+  const CharacterAssets = {
+    ready:false, gltf:null, failed:false,
+    load(done){
+      if(this.ready||this.failed){ if(done) done(this.ready); return; }
+      if(this._loading){ this._waiters.push(done); return; }
+      this._loading=true; this._waiters=done?[done]:[];
+      const loader=new GLTFLoader();
+      loader.load('assets/models/Soldier.glb', (gltf)=>{
+        this.gltf=gltf; this.ready=true; this._loading=false;
+        const w=this._waiters; this._waiters=[];
+        w.forEach(fn=>{ if(fn) fn(true); });
+      }, undefined, (err)=>{
+        console.warn('Character GLB load failed', err);
+        this.failed=true; this._loading=false;
+        const w=this._waiters; this._waiters=[];
+        w.forEach(fn=>{ if(fn) fn(false); });
+      });
+    },
+    create(team, opts){
+      opts=opts||{};
+      if(!this.ready||!this.gltf) return null;
+      const root=new THREE.Group();
+      root.name='character_'+(team||'T');
+      const model=SkeletonUtils.clone(this.gltf.scene);
+      // Mixamo faces -Z relative to our atan2(dx,dz) facing; flip so walk goes forward
+      model.rotation.y=Math.PI;
+      // Normalize height ~1.8m
+      model.updateMatrixWorld(true);
+      const box=new THREE.Box3().setFromObject(model);
+      const size=new THREE.Vector3(); box.getSize(size);
+      const targetH=1.78;
+      if(size.y>0.1){
+        const s=targetH/size.y;
+        model.scale.setScalar(s);
+        model.updateMatrixWorld(true);
+        const box2=new THREE.Box3().setFromObject(model);
+        model.position.y=-box2.min.y;
+      }
+      root.add(model);
+      const tintHex=team==='CT'?0x5a7aa0:0x9a7a48;
+      const tint=new THREE.Color(tintHex);
+      model.traverse(o=>{
+        if(!o.isMesh) return;
+        o.castShadow=true; o.receiveShadow=true;
+        o.frustumCulled=false;
+        if(o.material){
+          const mats=Array.isArray(o.material)?o.material:[o.material];
+          const cloned=mats.map(m=>{
+            const c=m.clone();
+            if(c.color) c.color.lerp(tint, team==='CT'?0.28:0.32);
+            if(c.emissive) c.emissive.setHex(0x000000);
+            c.side=THREE.FrontSide;
+            return c;
+          });
+          o.material=Array.isArray(o.material)?cloned:cloned[0];
+        }
+      });
+      const rightHand=findBoneByNames(model,['mixamorig:RightHand','mixamorigRightHand','RightHand']);
+      let gun=null;
+      if(opts.includeGun!==false){
+        const wid=opts.weaponId||'ak';
+        const skinCol=opts.weaponColor||null;
+        gun=buildWorldWeaponMesh(wid, skinCol);
+        if(rightHand){
+          rightHand.add(gun);
+          gun.scale.setScalar(1/Math.max(0.001, model.scale.x));
+        } else {
+          gun.position.set(0.22,1.15,0.28); root.add(gun);
+        }
+      }
+      if(opts.gloveColor!=null) applyGloveTint(model, opts.gloveColor);
+      const anim=new CharacterAnim(model, this.gltf.animations);
+      root.userData.anim=anim;
+      root.userData.model=model;
+      root.userData.rightHand=rightHand;
+      root.userData.gun=gun;
+      root.userData.weaponId=opts.weaponId||(opts.includeGun!==false?'ak':null);
+      root.userData.isGlb=true;
+      root.userData.limbs=null;
+      root.userData.headMesh=null;
+      root.userData.torso=model;
+      root.userData.head=findBoneByNames(model,['mixamorig:Head','Head']);
+      return root;
+    }
+  };
 
 
   // ===== MAIN MENU AGENT PREVIEW =====
 
-  /** Shared CT/T soldier body — used by lobby preview + in-game bots */
+  /** Shared CT/T soldier body — procedural fallback if GLB missing */
   function buildSoldierModel(opts){
     opts=opts||{};
     const isCT=opts.team!=='T';
     const detail=opts.detail!==false;
-    const gloveCol=opts.gloveColor!=null?opts.gloveColor:0x3a2a1c;
-    const vest=isCT?0x2c4f78:0x6a5438;
-    const pants=isCT?0x1a2e42:0x3a3228;
-    const accent=isCT?0x1e3a58:0x4a3a28;
-    const skinC=0xd4a574;
-    const boot=0x141414;
-    const segs=detail?18:12;
-    const mat=(c,o)=>new THREE.MeshPhysicalMaterial(Object.assign({color:c,roughness:0.58,metalness:0.18,clearcoat:0.12,clearcoatRoughness:0.55},o||{}));
+    const gloveCol=opts.gloveColor!=null?opts.gloveColor:(isCT?0x3a2a1c:0x2a2a2e);
+    // CS2-ish palette: SAS blue-grey vs Phoenix Connection desert (from phoenix-t.png)
+    const vest=isCT?0x2a4568:0xc4ae8a;
+    const vestDark=isCT?0x1a3048:0xb8b4a8;
+    const pants=isCT?0x1c2c3c:0x3a342c;
+    const accent=isCT?0x3a6a9a:0xa89070;
+    const skinC=0xc99570;
+    const boot=isCT?0x0e0e10:0x9a7a52;
+    const segs=detail?22:12;
+    const hi=detail?28:14;
+    const phoenixMaps=(!isCT && PHOENIX_IMG.img)?{
+      vest:makePhoenixVestTexture(),
+      pants:makePhoenixPantsTexture(),
+      side:makePhoenixSideTexture()
+    }:null;
+    const mat=(c,o)=>new THREE.MeshPhysicalMaterial(Object.assign({
+      color:c, roughness:0.62, metalness:0.12, clearcoat:0.1, clearcoatRoughness:0.55, envMapIntensity:0.55
+    }, o||{}));
+    const cloth=(c,o)=>mat(c, Object.assign({roughness:0.82, metalness:0.04, clearcoat:0.04}, o||{}));
+    const hard=(c,o)=>mat(c, Object.assign({roughness:0.32, metalness:0.42, clearcoat:0.35, clearcoatRoughness:0.28}, o||{}));
     const root=new THREE.Group();
     const cap=(r,len,m)=>{
-      if(THREE.CapsuleGeometry) return new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.001,len-r*2), 6, segs), m);
+      if(THREE.CapsuleGeometry) return new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.001,len-r*2), 5, segs), m);
       return new THREE.Mesh(new THREE.CylinderGeometry(r,r,len,segs), m);
     };
-    const lathe=(pts,m)=>{
+    const lathe=(pts,m,seg)=>{
       const v=pts.map(p=>new THREE.Vector2(p[0],p[1]));
-      return new THREE.Mesh(new THREE.LatheGeometry(v, segs), m);
+      return new THREE.Mesh(new THREE.LatheGeometry(v, seg||segs), m);
     };
+    const box=(w,h,d,m)=>new THREE.Mesh(new THREE.BoxGeometry(w,h,d), m);
+    const pantsMat=phoenixMaps
+      ? cloth(0xffffff,{map:phoenixMaps.pants, roughness:0.88, metalness:0.03})
+      : cloth(pants);
+    const vestMat=phoenixMaps
+      ? hard(0xffffff,{map:phoenixMaps.vest, roughness:0.55, metalness:0.12, clearcoat:0.12})
+      : hard(vest,{roughness:0.48,metalness:0.22,clearcoat:0.22});
+    const shirtMat=cloth(vestDark,{roughness:0.78});
 
-    const leftLeg=new THREE.Group(); leftLeg.position.set(-0.125,0.64,0); root.add(leftLeg);
-    const rightLeg=new THREE.Group(); rightLeg.position.set(0.125,0.64,0); root.add(rightLeg);
-    [[leftLeg],[rightLeg]].forEach(([leg])=>{
-      const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.078,0.095,0.32,segs), mat(pants,{roughness:0.7}));
-      thigh.position.y=-0.14; thigh.castShadow=true; leg.add(thigh);
-      const knee=new THREE.Mesh(new THREE.SphereGeometry(0.07,segs,segs), mat(pants,{roughness:0.65}));
-      knee.position.y=-0.3; leg.add(knee);
-      const calf=new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.08,0.3,segs), mat(pants,{roughness:0.72}));
-      calf.position.y=-0.46; calf.castShadow=true; leg.add(calf);
-      const shoe=cap(0.055,0.22, mat(boot,{roughness:0.88,metalness:0.08}));
-      shoe.rotation.x=Math.PI/2; shoe.position.set(0,-0.62,0.04); leg.add(shoe);
+    // --- Legs (tapered, knee pads, combat boots) ---
+    const leftLeg=new THREE.Group(); leftLeg.position.set(-0.13,0.66,0); root.add(leftLeg);
+    const rightLeg=new THREE.Group(); rightLeg.position.set(0.13,0.66,0); root.add(rightLeg);
+    [[leftLeg,1],[rightLeg,-1]].forEach(([leg,side])=>{
+      const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.072,0.098,0.34,segs), pantsMat);
+      thigh.position.y=-0.15; thigh.castShadow=true; leg.add(thigh);
+      // cargo pocket
       if(detail){
-        const pad=cap(0.05,0.12, mat(accent,{metalness:0.3}));
-        pad.rotation.x=Math.PI/2; pad.position.set(0,-0.18,0.07); leg.add(pad);
+        const pocket=box(0.07,0.1,0.04, cloth(vestDark,{roughness:0.88, map:phoenixMaps?phoenixMaps.pants:null}));
+        pocket.position.set(0.055*side, -0.12, 0.06); leg.add(pocket);
+      }
+      const knee=new THREE.Mesh(new THREE.SphereGeometry(0.068,segs,segs), pantsMat);
+      knee.position.y=-0.32; leg.add(knee);
+      if(detail){
+        const kpad=box(0.09,0.09,0.045, hard(accent,{metalness:0.25,roughness:0.45}));
+        kpad.position.set(0,-0.32,0.07); leg.add(kpad);
+        const strap=box(0.1,0.02,0.05, mat(0x111,{roughness:0.7}));
+        strap.position.set(0,-0.27,0.05); leg.add(strap);
+      }
+      const calf=new THREE.Mesh(new THREE.CylinderGeometry(0.058,0.078,0.32,segs), pantsMat);
+      calf.position.y=-0.49; calf.castShadow=true; leg.add(calf);
+      // combat boot
+      const bootShaft=new THREE.Mesh(new THREE.CylinderGeometry(0.062,0.07,0.16,segs), mat(boot,{roughness:0.9,metalness:0.05}));
+      bootShaft.position.y=-0.66; leg.add(bootShaft);
+      const sole=box(0.1,0.045,0.22, mat(0x080808,{roughness:0.95}));
+      sole.position.set(0,-0.74,0.04); leg.add(sole);
+      const toe=cap(0.048,0.12, mat(boot,{roughness:0.88}));
+      toe.rotation.x=Math.PI/2; toe.position.set(0,-0.72,0.1); leg.add(toe);
+      if(detail){
+        for(let i=0;i<3;i++){
+          const lace=box(0.06,0.008,0.012, mat(isCT?0x333:0x8a7050,{roughness:0.8}));
+          lace.position.set(0,-0.62-i*0.035,0.06); leg.add(lace);
+        }
       }
     });
 
-    const pelvis=lathe([[0.08,-0.08],[0.2,-0.05],[0.21,0.05],[0.16,0.09]], mat(pants,{roughness:0.68}));
-    pelvis.rotation.x=Math.PI/2; pelvis.position.set(0,0.7,0); pelvis.castShadow=true; root.add(pelvis);
-    const belt=new THREE.Mesh(new THREE.TorusGeometry(0.2,0.028,8,segs), mat(0x111,{metalness:0.5,roughness:0.35}));
-    belt.rotation.x=Math.PI/2; belt.position.set(0,0.78,0); root.add(belt);
+    // --- Pelvis / belt / loadout ---
+    const pelvis=lathe([[0.06,-0.09],[0.19,-0.06],[0.21,0.04],[0.15,0.1]], pantsMat, hi);
+    pelvis.rotation.x=Math.PI/2; pelvis.position.set(0,0.72,0); pelvis.castShadow=true; root.add(pelvis);
+    const belt=new THREE.Mesh(new THREE.TorusGeometry(0.195,0.03,8,segs), hard(0x121418,{metalness:0.55,roughness:0.3}));
+    belt.rotation.x=Math.PI/2; belt.position.set(0,0.8,0); root.add(belt);
+    // Phoenix winged buckle (gold) on T; plain steel on CT
+    const buckle=box(isCT?0.06:0.08, isCT?0.04:0.055, 0.025, hard(isCT?0x888:0xc9a227,{metalness:0.85,roughness:0.18}));
+    buckle.position.set(0,0.8,0.2); root.add(buckle);
+    // mag pouches on belt
+    for(let i=0;i<4;i++){
+      const hol=box(0.055,0.09,0.045, cloth(isCT?0x1a1c20:0x4a3a28,{roughness:0.75}));
+      const a=(-0.85+i*0.35);
+      hol.position.set(Math.sin(a)*0.2, 0.78, Math.cos(a)*0.16);
+      hol.rotation.y=a; root.add(hol);
+    }
     if(detail){
-      for(let i=0;i<3;i++){
-        const hol=cap(0.035,0.1, mat(0x1a1a1a));
-        hol.position.set(-0.14+i*0.14,0.78,0.14); root.add(hol);
-      }
+      const pistolHol=box(0.06,0.12,0.05, cloth(0x151515));
+      pistolHol.position.set(0.2,0.76,-0.05); pistolHol.rotation.z=-0.15; root.add(pistolHol);
+      const util=box(0.05,0.06,0.04, cloth(isCT?0x243848:0x6a5538));
+      util.position.set(-0.2,0.78,-0.08); root.add(util);
     }
 
-    const torsoG=new THREE.Group(); torsoG.position.set(0,0.82,0); root.add(torsoG);
-    const body=lathe([[0.1,-0.28],[0.22,-0.2],[0.24,0.05],[0.2,0.22],[0.12,0.3]], mat(vest,{roughness:0.45,metalness:0.25,clearcoat:0.2}));
-    body.rotation.x=Math.PI/2; body.position.set(0,0.34,0); body.castShadow=true; torsoG.add(body);
-    const plate=lathe([[0.05,-0.16],[0.16,-0.12],[0.17,0.1],[0.1,0.16]], mat(accent,{metalness:0.45,roughness:0.35,clearcoat:0.35}));
-    plate.rotation.x=Math.PI/2; plate.position.set(0,0.36,0.14); torsoG.add(plate);
-    const collar=new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.13,0.06,segs), mat(vest));
-    collar.position.set(0,0.62,0.02); torsoG.add(collar);
-    for(let i=0;i<3;i++){
-      const p=cap(0.04,0.1, mat(isCT?0x1a2838:0x3a2e22,{roughness:0.7}));
-      p.position.set(-0.13+i*0.13, 0.24, 0.18); torsoG.add(p);
-    }
+    // --- Torso / plate carrier ---
+    const torsoG=new THREE.Group(); torsoG.position.set(0,0.84,0); root.add(torsoG);
+    // undershirt / base (Phoenix: light grey short-sleeve)
+    const under=lathe([[0.09,-0.26],[0.2,-0.18],[0.22,0.08],[0.17,0.26],[0.1,0.32]], shirtMat, hi);
+    under.rotation.x=Math.PI/2; under.position.set(0,0.32,0); under.castShadow=true; torsoG.add(under);
+    // plate carrier shell
+    const carrier=lathe([[0.08,-0.2],[0.205,-0.14],[0.215,0.08],[0.17,0.22],[0.1,0.26]], vestMat, hi);
+    carrier.rotation.x=Math.PI/2; carrier.position.set(0,0.34,0.02); carrier.castShadow=true; torsoG.add(carrier);
+    // front plate
+    const plate=box(0.22,0.26,0.04, phoenixMaps
+      ? hard(0xffffff,{map:phoenixMaps.vest, metalness:0.2, roughness:0.4, clearcoat:0.2})
+      : hard(accent,{metalness:0.5,roughness:0.28,clearcoat:0.4}));
+    plate.position.set(0,0.34,0.16); torsoG.add(plate);
+    // molle / straps
     if(detail){
-      const radio=cap(0.035,0.12, mat(0x222,{metalness:0.55}));
-      radio.position.set(0.2,0.48,0.12); torsoG.add(radio);
-      const ant=new THREE.Mesh(new THREE.CylinderGeometry(0.007,0.007,0.16,6), mat(0x111,{metalness:0.85}));
-      ant.position.set(0.2,0.6,0.12); torsoG.add(ant);
+      for(let r=0;r<4;r++){
+        const strap=box(0.2,0.015,0.01, mat(0x111,{roughness:0.7}));
+        strap.position.set(0,0.24+r*0.06,0.185); torsoG.add(strap);
+      }
+      // shoulder straps
+      const sL=box(0.05,0.28,0.03, cloth(vestDark)); sL.position.set(-0.12,0.52,0.04); sL.rotation.z=0.2; torsoG.add(sL);
+      const sR=box(0.05,0.28,0.03, cloth(vestDark)); sR.position.set(0.12,0.52,0.04); sR.rotation.z=-0.2; torsoG.add(sR);
     }
+    // chest mag pouches (Phoenix: two larger waist pouches + upper patch)
     if(!isCT){
-      const pack=lathe([[0.06,-0.16],[0.14,-0.12],[0.15,0.1],[0.1,0.16]], mat(0x4a3a28,{roughness:0.8}));
-      pack.rotation.x=Math.PI/2; pack.position.set(0,0.34,-0.18); torsoG.add(pack);
-    }
-
-    const shL=new THREE.Mesh(new THREE.SphereGeometry(0.1,segs,segs), mat(vest));
-    shL.position.set(-0.28,0.54,0); torsoG.add(shL);
-    const shR=new THREE.Mesh(new THREE.SphereGeometry(0.1,segs,segs), mat(vest));
-    shR.position.set(0.28,0.54,0); torsoG.add(shR);
-    if(detail){
-      const padL=cap(0.05,0.12, mat(accent,{metalness:0.35})); padL.rotation.z=Math.PI/2; padL.position.set(-0.32,0.54,0.02); torsoG.add(padL);
-      const padR=cap(0.05,0.12, mat(accent,{metalness:0.35})); padR.rotation.z=Math.PI/2; padR.position.set(0.32,0.54,0.02); torsoG.add(padR);
-    }
-
-    const leftArm=new THREE.Group(); leftArm.position.set(-0.35,0.5,0.02); torsoG.add(leftArm);
-    const rightArm=new THREE.Group(); rightArm.position.set(0.35,0.5,0.04); torsoG.add(rightArm);
-    function buildArm(arm){
-      const upper=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.07,0.24,segs), mat(vest));
-      upper.position.y=-0.1; upper.castShadow=true; arm.add(upper);
-      const elbow=new THREE.Mesh(new THREE.SphereGeometry(0.052,segs,segs), mat(vest));
-      elbow.position.y=-0.22; arm.add(elbow);
-      const lower=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.06,0.22,segs), mat(vest));
-      lower.position.y=-0.34; arm.add(lower);
-      const palm=cap(0.035,0.08, mat(gloveCol,{roughness:0.78,clearcoat:0.15}));
-      palm.position.set(0,-0.48,0); arm.add(palm);
-      const cuff=new THREE.Mesh(new THREE.TorusGeometry(0.036,0.01,6,segs), mat(gloveCol,{roughness:0.65,metalness:0.25}));
-      cuff.rotation.x=Math.PI/2; cuff.position.set(0,-0.44,0); arm.add(cuff);
-      for(let i=0;i<4;i++){
-        const f=cap(0.009,0.04, mat(gloveCol,{roughness:0.75}));
-        f.position.set(-0.024+i*0.016, -0.52, -0.04); arm.add(f);
+      for(let i=0;i<2;i++){
+        const p=box(0.1,0.12,0.065, cloth(0x6b553c,{roughness:0.72, map:phoenixMaps?phoenixMaps.vest:null}));
+        p.position.set(-0.08+i*0.16, 0.24, 0.2); torsoG.add(p);
+        if(detail){
+          const flap=box(0.098,0.028,0.01, cloth(0x5a4830));
+          flap.position.set(-0.08+i*0.16, 0.31, 0.235); torsoG.add(flap);
+        }
+      }
+      const chestPatch=box(0.07,0.05,0.012, phoenixMaps
+        ? hard(0xffffff,{map:phoenixMaps.side, roughness:0.55, metalness:0.08})
+        : hard(0xa89070,{roughness:0.5}));
+      chestPatch.position.set(-0.1, 0.42, 0.19); torsoG.add(chestPatch);
+    } else {
+      for(let i=0;i<3;i++){
+        const p=box(0.07,0.11,0.055, cloth(0x1a2838,{roughness:0.72}));
+        p.position.set(-0.12+i*0.12, 0.28, 0.2); torsoG.add(p);
+        if(detail){
+          const flap=box(0.068,0.025,0.01, cloth(vestDark));
+          flap.position.set(-0.12+i*0.12, 0.34, 0.23); torsoG.add(flap);
+        }
       }
     }
-    buildArm(leftArm); buildArm(rightArm);
-    leftArm.rotation.z=0.1; rightArm.rotation.z=-0.16; rightArm.rotation.x=-0.32;
+    // collar
+    const collar=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.125,0.07,segs), isCT?cloth(vest):shirtMat);
+    collar.position.set(0,0.62,0.02); torsoG.add(collar);
+    // radio / admin pouch
+    if(detail){
+      const radio=box(0.06,0.1,0.04, hard(0x1a1a1a,{metalness:0.55}));
+      radio.position.set(0.2,0.46,0.12); torsoG.add(radio);
+      const ant=new THREE.Mesh(new THREE.CylinderGeometry(0.006,0.006,0.18,6), hard(0x111,{metalness:0.9}));
+      ant.position.set(0.2,0.58,0.12); torsoG.add(ant);
+      const mic=cap(0.012,0.05, hard(0x222)); mic.position.set(0.16,0.52,0.16); torsoG.add(mic);
+    }
+    // T backpack / CT hydration
+    if(!isCT){
+      const pack=lathe([[0.05,-0.14],[0.13,-0.1],[0.14,0.12],[0.08,0.18]],
+        phoenixMaps?cloth(0xffffff,{map:phoenixMaps.side,roughness:0.85}):cloth(0x4a3a28,{roughness:0.85}), hi);
+      pack.rotation.x=Math.PI/2; pack.position.set(0,0.34,-0.2); torsoG.add(pack);
+      if(detail){
+        const roll=cap(0.06,0.2, cloth(0x3a2e22)); roll.rotation.z=Math.PI/2; roll.position.set(0,0.5,-0.2); torsoG.add(roll);
+      }
+    } else if(detail){
+      const camel=box(0.16,0.22,0.06, cloth(0x1e3040,{roughness:0.8}));
+      camel.position.set(0,0.36,-0.18); torsoG.add(camel);
+    }
 
-    const headG=new THREE.Group(); headG.position.set(0,0.74,0); torsoG.add(headG);
-    const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.08,0.1,segs), mat(skinC,{roughness:0.5,metalness:0.05}));
+    // shoulders / delts
+    const shL=new THREE.Mesh(new THREE.SphereGeometry(0.105,segs,segs), isCT?cloth(vest):shirtMat);
+    shL.position.set(-0.3,0.52,0); torsoG.add(shL);
+    const shR=new THREE.Mesh(new THREE.SphereGeometry(0.105,segs,segs), isCT?cloth(vest):shirtMat);
+    shR.position.set(0.3,0.52,0); torsoG.add(shR);
+    if(detail){
+      const padL=box(0.1,0.06,0.12, hard(accent,{metalness:0.35})); padL.position.set(-0.34,0.54,0.02); torsoG.add(padL);
+      const padR=box(0.1,0.06,0.12, hard(accent,{metalness:0.35})); padR.position.set(0.34,0.54,0.02); torsoG.add(padR);
+      // team patch — T uses Phoenix side-profile texture
+      const patch=box(0.08,0.1,0.012, isCT
+        ? hard(0x4a9eff,{emissive:0x1a3a60,emissiveIntensity:0.15})
+        : (phoenixMaps
+          ? hard(0xffffff,{map:phoenixMaps.side, roughness:0.5, metalness:0.08})
+          : hard(0xf0a020,{emissive:0x4a2800,emissiveIntensity:0.15})));
+      patch.position.set(0.34,0.54,0.08); torsoG.add(patch);
+      if(!isCT && phoenixMaps){
+        // mirror side plate on the other shoulder
+        const patchL=box(0.08,0.1,0.012, hard(0xffffff,{map:phoenixMaps.side, roughness:0.5, metalness:0.08}));
+        patchL.position.set(-0.34,0.54,0.08); torsoG.add(patchL);
+      }
+    }
+
+    // --- Arms ---
+    const leftArm=new THREE.Group(); leftArm.position.set(-0.36,0.48,0.02); torsoG.add(leftArm);
+    const rightArm=new THREE.Group(); rightArm.position.set(0.36,0.48,0.04); torsoG.add(rightArm);
+    function buildArm(arm, side){
+      // Phoenix: light grey short sleeves; CT: vest-colored sleeves
+      const upper=new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.072,0.26,segs), isCT?cloth(vest):shirtMat);
+      upper.position.y=-0.11; upper.castShadow=true; arm.add(upper);
+      if(detail){
+        const sleeve=box(0.08,0.04,0.08, cloth(vestDark));
+        sleeve.position.set(0,-0.02,0); arm.add(sleeve);
+      }
+      const elbow=new THREE.Mesh(new THREE.SphereGeometry(0.05,segs,segs), isCT?cloth(vest,{roughness:0.7}):mat(skinC,{roughness:0.55,metalness:0.04}));
+      elbow.position.y=-0.24; arm.add(elbow);
+      if(detail && isCT){
+        const epad=box(0.07,0.07,0.04, hard(accent,{metalness:0.3,roughness:0.5}));
+        epad.position.set(0,-0.24,0.045); arm.add(epad);
+      }
+      const lower=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.058,0.24,segs), isCT?cloth(vest):mat(skinC,{roughness:0.55,metalness:0.04}));
+      lower.position.y=-0.37; arm.add(lower);
+      // glove hand
+      const palm=cap(0.036,0.085, mat(gloveCol,{roughness:0.78,clearcoat:0.18,metalness:0.12}));
+      palm.position.set(0,-0.52,0); arm.add(palm);
+      const cuff=new THREE.Mesh(new THREE.TorusGeometry(0.038,0.012,6,segs), mat(gloveCol,{roughness:0.6,metalness:0.28}));
+      cuff.rotation.x=Math.PI/2; cuff.position.set(0,-0.47,0); arm.add(cuff);
+      for(let i=0;i<4;i++){
+        const f=cap(0.01,0.045, mat(gloveCol,{roughness:0.75}));
+        f.position.set((-0.026+i*0.017)*side, -0.56, 0.035);
+        f.rotation.x=-0.35; arm.add(f);
+      }
+      const thumb=cap(0.011,0.035, mat(gloveCol,{roughness:0.75}));
+      thumb.position.set(0.03*side, -0.52, 0.02); thumb.rotation.z=-0.6*side; arm.add(thumb);
+    }
+    buildArm(leftArm, -1); buildArm(rightArm, 1);
+    leftArm.rotation.z=0.12; rightArm.rotation.z=-0.18; rightArm.rotation.x=-0.35;
+
+    // --- Head ---
+    const headG=new THREE.Group(); headG.position.set(0,0.76,0); torsoG.add(headG);
+    const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.078,0.11,segs), mat(skinC,{roughness:0.55,metalness:0.04,clearcoat:0.12}));
     neck.position.y=-0.1; headG.add(neck);
     const faceMap=opts.faceMap||null;
     const faceMat=new THREE.MeshPhysicalMaterial({
-      map:faceMap, roughness:0.45, metalness:0.03, color:0xffffff, clearcoat:0.08
+      map:faceMap, roughness:0.42, metalness:0.02, color:0xffffff,
+      clearcoat:0.12, clearcoatRoughness:0.55, sheen:0.35, sheenRoughness:0.6,
+      sheenColor:new THREE.Color(0xc08060), envMapIntensity:0.4
     });
-    const headMesh=new THREE.Mesh(new THREE.SphereGeometry(0.19, detail?36:24, detail?32:20), faceMat);
+    // slightly elongated head (less perfect ball)
+    const headMesh=new THREE.Mesh(new THREE.SphereGeometry(0.185, detail?40:22, detail?36:18), faceMat);
+    headMesh.scale.set(0.92, 1.05, 0.95);
     headMesh.castShadow=true; headG.add(headMesh);
 
     if(isCT){
-      const helm=new THREE.Mesh(new THREE.SphereGeometry(0.222, detail?32:18, detail?24:14, 0, Math.PI*2, 0, Math.PI*0.62),
-        mat(0x2a4a6e,{metalness:0.5,roughness:0.28,clearcoat:0.4}));
-      helm.position.set(0,0.04,-0.01); headG.add(helm);
-      const jawL=cap(0.045,0.14, mat(0x1e3550,{metalness:0.45})); jawL.rotation.y=0.4; jawL.position.set(-0.12,-0.04,0.1); headG.add(jawL);
-      const jawR=cap(0.045,0.14, mat(0x1e3550,{metalness:0.45})); jawR.rotation.y=-0.4; jawR.position.set(0.12,-0.04,0.1); headG.add(jawR);
-      const chin=cap(0.07,0.12, mat(0x172838,{metalness:0.4})); chin.rotation.x=Math.PI/2; chin.position.set(0,-0.1,0.12); headG.add(chin);
-      const visor=new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.11,0.04,segs), mat(0x0a1018,{metalness:0.9,roughness:0.12,clearcoat:0.7}));
-      visor.rotation.x=Math.PI/2; visor.position.set(0,0.07,0.14); headG.add(visor);
-      const earL=cap(0.025,0.07, mat(0x111,{metalness:0.55})); earL.position.set(-0.19,0.02,0); headG.add(earL);
-      const earR=cap(0.025,0.07, mat(0x111,{metalness:0.55})); earR.position.set(0.19,0.02,0); headG.add(earR);
+      // combat helmet
+      const helm=new THREE.Mesh(
+        new THREE.SphereGeometry(0.215, detail?36:18, detail?28:14, 0, Math.PI*2, 0, Math.PI*0.58),
+        hard(0x2a4a6e,{metalness:0.48,roughness:0.26,clearcoat:0.45})
+      );
+      helm.position.set(0,0.05,-0.015); headG.add(helm);
+      // helmet rim
+      const rim=new THREE.Mesh(new THREE.TorusGeometry(0.195,0.018,8,segs), hard(0x1a3048,{metalness:0.55}));
+      rim.rotation.x=Math.PI/2; rim.position.set(0,0.02,0); headG.add(rim);
+      // NVG mount
+      if(detail){
+        const nvg=box(0.08,0.04,0.06, hard(0x111,{metalness:0.7}));
+        nvg.position.set(0,0.14,0.12); headG.add(nvg);
+        const nvgArm=box(0.03,0.02,0.08, hard(0x222,{metalness:0.6}));
+        nvgArm.position.set(0,0.12,0.18); headG.add(nvgArm);
+      }
+      // mandible / face shield frame
+      const jawL=cap(0.04,0.15, hard(0x1e3550,{metalness:0.45})); jawL.rotation.y=0.45; jawL.position.set(-0.11,-0.05,0.11); headG.add(jawL);
+      const jawR=cap(0.04,0.15, hard(0x1e3550,{metalness:0.45})); jawR.rotation.y=-0.45; jawR.position.set(0.11,-0.05,0.11); headG.add(jawR);
+      const chin=cap(0.065,0.13, hard(0x172838,{metalness:0.4})); chin.rotation.x=Math.PI/2; chin.position.set(0,-0.11,0.13); headG.add(chin);
+      // goggles / visor
+      const visor=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.055,0.06), new THREE.MeshPhysicalMaterial({
+        color:0x0a1828, metalness:0.85, roughness:0.08, clearcoat:1, clearcoatRoughness:0.05,
+        transparent:true, opacity:0.85, envMapIntensity:1.2
+      }));
+      visor.position.set(0,0.06,0.15); headG.add(visor);
+      // headset
+      const earL=cap(0.028,0.08, hard(0x111,{metalness:0.55})); earL.position.set(-0.195,0.02,0); headG.add(earL);
+      const earR=cap(0.028,0.08, hard(0x111,{metalness:0.55})); earR.position.set(0.195,0.02,0); headG.add(earR);
+      if(detail){
+        const band=new THREE.Mesh(new THREE.TorusGeometry(0.2,0.012,6,segs), hard(0x111,{metalness:0.4}));
+        band.rotation.z=Math.PI/2; band.position.set(0,0.02,0); headG.add(band);
+        const micBoom=new THREE.Mesh(new THREE.CylinderGeometry(0.006,0.006,0.12,6), hard(0x222));
+        micBoom.rotation.z=1.1; micBoom.position.set(0.14,-0.02,0.1); headG.add(micBoom);
+      }
     } else {
-      const beanie=new THREE.Mesh(new THREE.SphereGeometry(0.21, detail?20:14, detail?14:10, 0, Math.PI*2, 0, Math.PI*0.55), mat(0x2a2218,{roughness:0.9,metalness:0.05}));
-      beanie.position.set(0,0.05,-0.02); headG.add(beanie);
-      const mask=new THREE.Mesh(new THREE.SphereGeometry(0.195, detail?16:12, detail?12:8, 0, Math.PI*2, Math.PI*0.42, Math.PI*0.45), mat(0x1a1512,{roughness:0.92}));
-      mask.position.set(0,-0.01,0.01); headG.add(mask);
+      // Phoenix balaclava — head map carries the knit mask; soft hood rim only
+      if(detail){
+        const fold=new THREE.Mesh(new THREE.TorusGeometry(0.185,0.018,6,segs), cloth(0x2a2218,{roughness:0.92}));
+        fold.rotation.x=Math.PI/2; fold.position.set(0,0.04,-0.01); headG.add(fold);
+      }
+      // light geometric mask kept subtle so phoenix face texture stays readable
+      const mask=new THREE.Mesh(
+        new THREE.SphereGeometry(0.188, detail?20:12, detail?16:8, 0, Math.PI*2, Math.PI*0.55, Math.PI*0.35),
+        cloth(0x1a1512,{roughness:0.94, transparent:true, opacity:0.35})
+      );
+      mask.position.set(0,-0.02,0.01); headG.add(mask);
     }
 
-    const gunPivot=new THREE.Group(); gunPivot.position.set(0.02,-0.34,0.4); rightArm.add(gunPivot);
+    const gunPivot=new THREE.Group(); gunPivot.position.set(0.02,-0.36,0.42); rightArm.add(gunPivot);
 
     let gun=null;
     if(opts.includeGun!==false){
       gun=new THREE.Group();
       const gPts=[[0.015,-0.26],[0.038,-0.2],[0.042,0.05],[0.032,0.2],[0.018,0.26]].map(p=>new THREE.Vector2(p[0],p[1]));
-      const gBody=new THREE.Mesh(new THREE.LatheGeometry(gPts,14), mat(0x2e3238,{metalness:0.6,roughness:0.28,clearcoat:0.3}));
+      const gBody=new THREE.Mesh(new THREE.LatheGeometry(gPts,14), hard(0x2e3238,{metalness:0.65,roughness:0.25,clearcoat:0.35}));
       gBody.rotation.x=Math.PI/2; gun.add(gBody);
-      const hg=new THREE.Mesh(new THREE.CylinderGeometry(0.032,0.035,0.2,12), mat(0x1a1a1a,{metalness:0.45}));
+      const hg=new THREE.Mesh(new THREE.CylinderGeometry(0.032,0.035,0.2,12), hard(0x1a1a1a,{metalness:0.45}));
       hg.rotation.x=Math.PI/2; hg.position.set(0,0.01,-0.28); gun.add(hg);
-      const gBar=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.018,0.34,12), mat(0x111,{metalness:0.8,roughness:0.18}));
+      const gBar=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.018,0.34,12), hard(0x111,{metalness:0.85,roughness:0.15}));
       gBar.rotation.x=Math.PI/2; gBar.position.set(0,0.01,-0.48); gun.add(gBar);
       const mag=THREE.CapsuleGeometry
-        ? new THREE.Mesh(new THREE.CapsuleGeometry(0.02,0.09,4,10), mat(0x1a1a1a))
-        : new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.12,10), mat(0x1a1a1a));
+        ? new THREE.Mesh(new THREE.CapsuleGeometry(0.02,0.09,4,10), hard(0x1a1a1a))
+        : new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.12,10), hard(0x1a1a1a));
       mag.position.set(0,-0.1,0.02); gun.add(mag);
-      const stock=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.03,0.16,12), mat(0x2a2a2a));
+      const stock=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.03,0.16,12), hard(0x2a2a2a));
       stock.rotation.x=Math.PI/2; stock.position.set(0,0,0.28); gun.add(stock);
       gun.position.set(0.1,0.26,-0.2); gun.rotation.x=0.12; rightArm.add(gun);
     }
@@ -2530,8 +3162,10 @@ input{font-family:inherit}
     root.userData.head=headG;
     root.userData.rightArm=rightArm;
     root.userData.gunPivot=gunPivot;
+    root.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; }});
     return root;
   }
+
 
 
   LobbyPreview = {
@@ -2551,17 +3185,18 @@ input{font-family:inherit}
       this.renderer.shadowMap.enabled=true;
       this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
       this.scene=new THREE.Scene();
-      this.camera=new THREE.PerspectiveCamera(30, 1, 0.1, 50);
-      this.camera.position.set(0.35, 1.48, 3.15);
-      this.camera.lookAt(0, 1.15, 0);
+      this.camera=new THREE.PerspectiveCamera(28, 1, 0.1, 50);
+      this.camera.position.set(0.55, 1.55, 3.35);
+      this.camera.lookAt(0.05, 1.2, 0);
       this.clock=new THREE.Clock();
-      this.scene.add(new THREE.HemisphereLight(0xffe8d8, 0x1a2030, 0.55));
-      const key=new THREE.DirectionalLight(0xfff2e0, 1.35); key.position.set(2.2,4.2,3.2); key.castShadow=true;
-      key.shadow.mapSize.set(1024,1024); key.shadow.camera.near=0.5; key.shadow.camera.far=12;
+      this.scene.add(new THREE.HemisphereLight(0xffe8d8, 0x121820, 0.62));
+      const key=new THREE.DirectionalLight(0xfff4e8, 1.55); key.position.set(2.4,4.5,3.4); key.castShadow=true;
+      key.shadow.mapSize.set(2048,2048); key.shadow.camera.near=0.5; key.shadow.camera.far=12;
       key.shadow.camera.left=-2; key.shadow.camera.right=2; key.shadow.camera.top=3; key.shadow.camera.bottom=-1;
       this.scene.add(key);
-      const fill=new THREE.DirectionalLight(0x7aa0d0, 0.4); fill.position.set(-3.2,2.2,-1.5); this.scene.add(fill);
-      const rim=new THREE.PointLight(0xf0a020, 0.85, 10); rim.position.set(-1.4,1.9,1.8); this.scene.add(rim);
+      const fill=new THREE.DirectionalLight(0x6a90c0, 0.55); fill.position.set(-3.4,2.4,-1.6); this.scene.add(fill);
+      const rim=new THREE.PointLight(0xf0a020, 1.05, 12); rim.position.set(-1.5,2.0,1.9); this.scene.add(rim);
+      const kick=new THREE.PointLight(0x88b4ff, 0.45, 8); kick.position.set(1.2,1.0,2.2); this.scene.add(kick);
       // soft backdrop
       const bg=new THREE.Mesh(
         new THREE.PlaneGeometry(6,4),
@@ -2578,13 +3213,14 @@ input{font-family:inherit}
       ring.rotation.x=Math.PI/2; ring.position.y=0.015; this.scene.add(ring);
       const ring2=new THREE.Mesh(new THREE.TorusGeometry(1.55,0.006,8,64), new THREE.MeshBasicMaterial({color:0x4a9eff, transparent:true, opacity:0.45}));
       ring2.rotation.x=Math.PI/2; ring2.position.y=0.012; this.scene.add(ring2);
-      this.buildAgent();
       this.ready=true;
       this.resize();
       addEventListener('resize',()=>this.resize());
       this.setActive(true);
-      // refresh face when portraits finish loading
-      loadFaceImages(()=>{ this.applyAvatarToFace(); });
+      CharacterAssets.load(()=>{
+        this.buildAgent();
+        loadFaceImages(()=>{ this.applyAvatarToFace(); });
+      });
     },
 
     resize(){
@@ -2622,15 +3258,32 @@ input{font-family:inherit}
     buildAgent(){
       if(this.agent){this.scene.remove(this.agent);}
       const gloveSkin=getSkin(save.equipped&&save.equipped.gloves);
-      const glove=gloveSkin?new THREE.Color(gloveSkin.color).getHex():0x4a3422;
-      const root=buildSoldierModel({
-        team:'CT',
-        detail:true,
-        gloveColor:glove,
-        includeGun:false,
-        faceMap:makeHeadTexture('CT', FACE_IMGS.ct)
+      const glove=gloveSkin?new THREE.Color(gloveSkin.color).getHex():0x4a6a90;
+      let wid='ak';
+      const order=['ak','galil','m4','awp','mac10','mp9','ump','nova','xm','mag7','deagle','usps','pistol','knife'];
+      for(const id of order){ if(save.equipped[id]){ wid=id; break; } }
+      if(this.forceWeapon) wid=this.forceWeapon;
+      const skin=getSkin(save.equipped&&save.equipped[wid]);
+      let root=CharacterAssets.create('CT', {
+        includeGun:true,
+        weaponId:wid,
+        weaponColor:skin?skin.color:null,
+        gloveColor:glove
       });
+      if(!root){
+        root=buildSoldierModel({
+          team:'CT',
+          detail:true,
+          gloveColor:glove,
+          includeGun:false,
+          faceMap:makeHeadTexture('CT', FACE_IMGS.ct)
+        });
+      } else {
+        // model.rotation.y=π for gameplay forward; face camera (+Z) in lobby
+        root.rotation.y=Math.PI;
+      }
       this.agent=root;
+      this.anim=root.userData.anim||null;
       this.torso=root.userData.torso;
       this.head=root.userData.head;
       this.headMesh=root.userData.headMesh;
@@ -2638,7 +3291,7 @@ input{font-family:inherit}
       this.gunPivot=root.userData.gunPivot;
       this.limbs=root.userData.limbs;
       this.scene.add(root);
-      this.applyAvatarToFace();
+      if(this.headMesh) this.applyAvatarToFace();
       this.refreshWeapon();
     },
 
@@ -2692,20 +3345,35 @@ input{font-family:inherit}
     },
 
     refreshWeapon(){
-      if(!this.gunPivot)return;
-      while(this.gunPivot.children.length)this.gunPivot.remove(this.gunPivot.children[0]);
       let wid='ak';
       const order=['ak','galil','m4','awp','mac10','mp9','ump','nova','xm','mag7','deagle','usps','pistol','knife'];
       for(const id of order){ if(save.equipped[id]){ wid=id; break; } }
       if(this.forceWeapon) wid=this.forceWeapon;
       const skin=getSkin(save.equipped[wid]);
-      this.weapon=this.buildLobbyWeapon(wid, skin?skin.color:'#777');
-      this.gunPivot.add(this.weapon);
-      this.currentShowWeapon=wid;
       const nameEl=document.getElementById('agentLoadout');
       if(nameEl) nameEl.textContent=(WEAPONS[wid]?WEAPONS[wid].name:wid)+' · '+(skin?skin.name:'Default');
       const n=document.getElementById('agentName');
       if(n) n.textContent=save.nickname||'Player';
+      // GLB: swap world weapon on RightHand
+      if(this.agent&&this.agent.userData&&this.agent.userData.isGlb){
+        const hand=this.agent.userData.rightHand;
+        const old=this.agent.userData.gun;
+        if(old&&old.parent) old.parent.remove(old);
+        const gun=buildWorldWeaponMesh(wid, skin?skin.color:null);
+        const model=this.agent.userData.model;
+        const scale=model&&model.scale?model.scale.x:1;
+        if(hand){ hand.add(gun); gun.scale.setScalar(1/Math.max(0.001,scale)); }
+        else this.agent.add(gun);
+        this.agent.userData.gun=gun;
+        this.agent.userData.weaponId=wid;
+        this.currentShowWeapon=wid;
+        return;
+      }
+      if(!this.gunPivot)return;
+      while(this.gunPivot.children.length)this.gunPivot.remove(this.gunPivot.children[0]);
+      this.weapon=this.buildLobbyWeapon(wid, skin?skin.color:'#777');
+      this.gunPivot.add(this.weapon);
+      this.currentShowWeapon=wid;
     },
 
     showWeapon(weaponId){
@@ -2731,41 +3399,61 @@ input{font-family:inherit}
       this.animId=requestAnimationFrame(()=>this.loop());
       const dt=Math.min(0.05, this.clock.getDelta());
       this.t+=dt;
-      // idle breathe + weight shift
-      if(this.torso){
-        this.torso.position.y=0.82+Math.sin(this.t*1.55)*0.014;
-        this.torso.rotation.y=Math.sin(this.t*0.45)*0.05;
-        this.torso.rotation.z=Math.sin(this.t*0.7)*0.015;
-      }
-      if(this.head){
-        this.head.rotation.y=Math.sin(this.t*0.35)*0.08;
-        this.head.rotation.x=Math.sin(this.t*0.55)*0.03-0.04;
-      }
-      if(this.limbs){
-        const sway=Math.sin(this.t*1.2)*0.04;
-        this.limbs.leftLeg.rotation.x=sway; this.limbs.rightLeg.rotation.x=-sway*0.8;
-      }
-      // inspect cycle every ~5s
-      const cycle=this.t % 5.5;
       let inspect=0;
-      if(cycle>2.2 && cycle<4.2){
-        const u=(cycle-2.2)/2;
-        inspect=Math.sin(u*Math.PI);
-      }
-      if(this.rightArm){
-        // raise & turn gun toward face for inspect
-        this.rightArm.rotation.x=-0.55 - inspect*0.95;
-        this.rightArm.rotation.y=-0.2 - inspect*0.65;
-        this.rightArm.rotation.z=0.15 + inspect*0.4;
-      }
-      if(this.head){
-        this.head.rotation.x=-0.08 - inspect*0.4;
-        this.head.rotation.y=-0.12 - inspect*0.5;
-      }
-      if(this.gunPivot){
-        this.gunPivot.rotation.x=inspect*0.55;
-        this.gunPivot.rotation.z=-inspect*0.85;
-        this.gunPivot.rotation.y=inspect*0.2;
+      if(this.anim){
+        this.anim.update(dt);
+        // periodic aim / shoot showcase once per cycle
+        const cycle=this.t % 7.5;
+        const slot=Math.floor(this.t/7.5);
+        if(this._lobbyCycleSlot!==slot){
+          this._lobbyCycleSlot=slot;
+          this._lobbyShot=false;
+        }
+        if(!this.anim.locked){
+          if(cycle>4.5 && cycle<6.2){
+            if(cycle>5.15 && cycle<5.45 && !this._lobbyShot){
+              this._lobbyShot=true;
+              this.anim.playOneShot('shoot','aim');
+            } else if(this.anim.state!=='shoot') this.anim.setState('aim');
+          } else if(this.anim.state!=='shoot' && this.anim.state!=='reload'){
+            this.anim.setState('idle');
+          }
+        }
+        inspect=(cycle>4.5&&cycle<6.0)?0.35:0;
+      } else {
+        // procedural fallback breathe + inspect
+        if(this.torso){
+          this.torso.position.y=0.82+Math.sin(this.t*1.55)*0.014;
+          this.torso.rotation.y=Math.sin(this.t*0.45)*0.05;
+          this.torso.rotation.z=Math.sin(this.t*0.7)*0.015;
+        }
+        if(this.head){
+          this.head.rotation.y=Math.sin(this.t*0.35)*0.08;
+          this.head.rotation.x=Math.sin(this.t*0.55)*0.03-0.04;
+        }
+        if(this.limbs){
+          const sway=Math.sin(this.t*1.2)*0.04;
+          this.limbs.leftLeg.rotation.x=sway; this.limbs.rightLeg.rotation.x=-sway*0.8;
+        }
+        const cycle=this.t % 5.5;
+        if(cycle>2.2 && cycle<4.2){
+          const u=(cycle-2.2)/2;
+          inspect=Math.sin(u*Math.PI);
+        }
+        if(this.rightArm){
+          this.rightArm.rotation.x=-0.55 - inspect*0.95;
+          this.rightArm.rotation.y=-0.2 - inspect*0.65;
+          this.rightArm.rotation.z=0.15 + inspect*0.4;
+        }
+        if(this.head){
+          this.head.rotation.x=-0.08 - inspect*0.4;
+          this.head.rotation.y=-0.12 - inspect*0.5;
+        }
+        if(this.gunPivot){
+          this.gunPivot.rotation.x=inspect*0.55;
+          this.gunPivot.rotation.z=-inspect*0.85;
+          this.gunPivot.rotation.y=inspect*0.2;
+        }
       }
       // slow orbit-ish camera sway
       this.camera.position.x=0.35+Math.sin(this.t*0.35)*0.12;
@@ -2794,17 +3482,20 @@ input{font-family:inherit}
       this.mode=modeId||'dm';
       this.mapId=mapId||this.mapId||'dust2';
       this.playerSide=(team==='T'?'T':'CT');
-      showScreen('game');
-      if(!this.renderer)this.initThree();
-      else this.buildMap();
-      this.resetMatch();
-      this.running=true; this.paused=false;
-      this.setBigMap(false);
-      document.getElementById('pauseMenu').classList.remove('active');
-      document.getElementById('lockOverlay').classList.add('active');
-      const mn=(typeof MAP_INFO!=='undefined'&&MAP_INFO[this.mapId])?MAP_INFO[this.mapId].file:('de_'+this.mapId);
-      document.getElementById('lockTitle').textContent=mn+' · '+MODES[this.mode].name+(MODES[this.mode].bomb?' · '+this.playerSide:'');
-      this.loop();
+      const begin=()=>{
+        showScreen('game');
+        if(!this.renderer)this.initThree();
+        else this.buildMap();
+        this.resetMatch();
+        this.running=true; this.paused=false;
+        this.setBigMap(false);
+        document.getElementById('pauseMenu').classList.remove('active');
+        document.getElementById('lockOverlay').classList.add('active');
+        const mn=(typeof MAP_INFO!=='undefined'&&MAP_INFO[this.mapId])?MAP_INFO[this.mapId].file:('de_'+this.mapId);
+        document.getElementById('lockTitle').textContent=mn+' · '+MODES[this.mode].name+(MODES[this.mode].bomb?' · '+this.playerSide:'');
+        this.loop();
+      };
+      CharacterAssets.load(()=>begin());
     },
     stop(){
       this.running=false;this.paused=false;this.killCam=null;this.spectate=null;
@@ -3770,14 +4461,65 @@ input{font-family:inherit}
 
     createBotMesh(team){
       const isCT=team==='CT';
+      const gloveHex=isCT?0x2a4058:0x3a2a1c;
+      const glb=CharacterAssets.create(isCT?'CT':'T', {includeGun:false, gloveColor:gloveHex});
+      if(glb) return glb;
+      const q=save.settings&&save.settings.quality;
       const root=buildSoldierModel({
         team:isCT?'CT':'T',
-        detail:false,
-        gloveColor:isCT?0x2a3540:0x3a2a1c,
-        includeGun:true,
+        detail:q!=='perf',
+        gloveColor:gloveHex,
+        includeGun:false,
         faceMap:makeBotFace(isCT?'CT':'T')
       });
       return root;
+    },
+
+    pickBotLoadout(team, index){
+      const isCT=team==='CT';
+      const isDM=team==='enemy'||!MODES[this.mode].bomb;
+      let primary, secondary;
+      if(isDM){
+        const pool=['ak','m4','awp','galil','mac10','mp9','ump','nova','deagle','usps'];
+        primary=pool[index%pool.length];
+        secondary=Math.random()<0.35?'deagle':(primary==='m4'||primary==='mp9'||primary==='usps'?'usps':'pistol');
+      } else if(isCT){
+        const prims=['m4','m4','mp9','ump','mag7','awp'];
+        primary=prims[index%prims.length];
+        secondary='usps';
+      } else {
+        const prims=['ak','ak','galil','mac10','ump','awp'];
+        primary=prims[index%prims.length];
+        secondary='pistol';
+      }
+      return {primary, secondary, knife:'knife'};
+    },
+
+    equipBotWeapon(bot, weaponId){
+      if(!bot||!bot.mesh) return;
+      const id=weaponId||'knife';
+      const hand=bot.mesh.userData.rightHand;
+      const old=bot.mesh.userData.gun;
+      if(old){
+        if(old.parent) old.parent.remove(old);
+        old.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; ms.forEach(m=>m.dispose&&m.dispose()); }});
+      }
+      // Prefer equipped skin color if player has that weapon skin (visual flair)
+      const skin=getSkin(save.equipped&&save.equipped[id]);
+      const gun=buildWorldWeaponMesh(id, skin?skin.color:null);
+      const model=bot.mesh.userData.model;
+      const scale=model&&model.scale?model.scale.x:1;
+      if(hand){
+        hand.add(gun);
+        gun.scale.setScalar(1/Math.max(0.001, scale));
+      } else {
+        gun.position.set(0.25,1.2,0.3);
+        bot.mesh.add(gun);
+      }
+      bot.mesh.userData.gun=gun;
+      bot.mesh.userData.weaponId=id;
+      bot.weapon=id;
+      bot.weaponClass=(WEAPONS[id]&&WEAPONS[id].type)||'rifle';
     },
 
     resetMatch(){
@@ -3859,6 +4601,7 @@ input{font-family:inherit}
         b.hp=100;b.alive=true;b.mesh.visible=true;b.state='patrol';b.plantProgress=0;b.blindUntil=0;
         const list=b.team==='CT'?this.ctSpawns:this.tSpawns;
         const p=list[i%list.length];b.mesh.position.set(p.x,0,p.z);b.mesh.rotation.set(0,b.team==='CT'?0:Math.PI,0);
+        if(b.mesh.userData&&b.mesh.userData.anim) b.mesh.userData.anim.resetToIdle();
       });
       this.bots.forEach(b=>b.hasBomb=false);
       this.player.hasBomb=false;
@@ -3887,20 +4630,25 @@ input{font-family:inherit}
     spawnBot(index,team,ally){
       const list=team==='CT'?this.ctSpawns:team==='T'?this.tSpawns:this.waypoints;
       const wp=(list[index%list.length]||this.waypoints[0]).clone();
-      const mesh=this.createBotMesh(team==='enemy'?'T':team);
+      const meshTeam=team==='enemy'?'T':team;
+      const mesh=this.createBotMesh(meshTeam);
       mesh.position.set(wp.x,0,wp.z);
       mesh.rotation.set(0,team==='CT'?0:Math.PI,0);
       this.scene.add(mesh);
-      const skill=0.28+Math.random()*0.28; // weaker aim / decisions
+      const skill=0.28+Math.random()*0.28;
+      const loadout=this.pickBotLoadout(meshTeam==='CT'?'CT':(team==='enemy'?'enemy':'T'), index);
       const bot={id:index,name:(ally?'Ally ':'')+(team==='CT'?'CT':'T')+' '+(index%10+1),
         mesh,team:team==='enemy'?'enemy':team,ally:!!ally,hp:100,alive:true,respawnAt:0,
         state:'patrol',targetWp:Math.floor(Math.random()*this.waypoints.length),
-        shootCd:0,speed:2.85+Math.random()*0.55,reaction:0.28+Math.random()*0.35,lastHurt:0,
+        shootCd:0,speed:5.6+Math.random()*0.7, maxSpeed:6.2, reaction:0.28+Math.random()*0.35,lastHurt:0,
         hasBomb:false,plantTarget:Math.random()<0.5?'A':'B',plantProgress:0,
         facing:team==='CT'?0:Math.PI,
         walkPhase:Math.random()*Math.PI*2,moving:false,
+        vel:new THREE.Vector3(),
+        loadout, weapon:loadout.primary, weaponClass:'rifle',
         skill, aimHold:0, strafeDir:(Math.random()<0.5?1:-1), strafeT:0,
         memory:null, memoryT:0, coverT:0, engageT:0};
+      this.equipBotWeapon(bot, loadout.primary);
       this.bots.push(bot);this.botKills[bot.name]=0;return bot;
     },
 
@@ -4212,27 +4960,30 @@ input{font-family:inherit}
       AudioFX.shoot(this.currentWeapon);this.muzzleFlash.intensity=(w.id==='deagle'||w.id==='awp'||w.type==='shotgun')?7:5;
       const origin=this.camera.getWorldPosition(new THREE.Vector3());
       const baseDir=new THREE.Vector3(0,0,-1).applyQuaternion(this.camera.quaternion);
-      const moveBloom=(this.player.vel&&Math.hypot(this.player.vel.x,this.player.vel.z)>1)?0.012:0;
-      const crouchMul=this.crouching?0.55:1;
-      const spreadMul=this.ads?0.15:1;
-      const range = w.type==='sniper' ? 250 : (w.type==='shotgun'?55:180);
+      const moveBloom=(this.player.vel&&Math.hypot(this.player.vel.x,this.player.vel.z)>1)?0.008:0;
+      const crouchMul=this.crouching?0.5:1;
+      const spreadMul=this.ads?0.12:1;
+      // Long maps need real long-range hits (DM / bomb / duo)
+      const range = w.type==='sniper' ? 480 : (w.type==='shotgun'?70:(w.type==='smg'?280:(w.type==='pistol'?300:380)));
       const pellets = w.type==='shotgun' ? (w.pellets||8) : 1;
+      const firstShot = this.sprayIndex<=1;
       let anyHit=false;
       for(let p=0;p<pellets;p++){
         const dir=baseDir.clone();
-        const pelletSpread = w.type==='shotgun' ? w.spread*(0.45+Math.random()*0.7) : w.spread*0.7*spreadMul*crouchMul;
-        dir.x+=(Math.random()-0.5)*pelletSpread+moveBloom+(p===0?sx*sprayScale:0);
-        dir.y+=(Math.random()-0.5)*pelletSpread*0.85+moveBloom+(p===0?sy*sprayScale*0.15:0);
+        const baseSpread = w.type==='shotgun' ? w.spread*(0.45+Math.random()*0.7)
+          : w.spread*(firstShot?0.28:0.48)*spreadMul*crouchMul;
+        dir.x+=(Math.random()-0.5)*baseSpread+moveBloom+(p===0?sx*sprayScale:0);
+        dir.y+=(Math.random()-0.5)*baseSpread*0.8+moveBloom+(p===0?sy*sprayScale*0.12:0);
         dir.normalize();
-        if(p===0 || w.type==='shotgun') this.spawnTracer(origin.clone().add(dir.clone().multiplyScalar(0.8)),dir.clone(), Math.min(range, w.type==='shotgun'?40:range));
+        if(p===0 || w.type==='shotgun') this.spawnTracer(origin.clone().add(dir.clone().multiplyScalar(0.8)),dir.clone(), Math.min(range, w.type==='shotgun'?45:range));
         const hit=this.raycastBots(origin,dir,range);
         if(hit){
           anyHit=true;
           this.damageBot(hit.bot,w.damage,hit.head&&pellets===1);
           if(p===0) this.spawnImpact(origin.clone().add(dir.clone().multiplyScalar(hit.t)), true);
         } else if(p===0){
-          const wallT=this.raycastWalls(origin,dir,Math.min(range,80));
-          if(wallT<Math.min(range,80)-0.5) this.spawnImpact(origin.clone().add(dir.clone().multiplyScalar(wallT)), false);
+          const wallT=this.raycastWalls(origin,dir,range,{clearLow:true});
+          if(wallT<range-0.5) this.spawnImpact(origin.clone().add(dir.clone().multiplyScalar(wallT)), false);
         }
       }
       this.updateHUD();
@@ -4367,19 +5118,19 @@ input{font-family:inherit}
         if(this.mode!=='dm'){
           if(bot.ally||bot.team===this.player.team)continue;
         }
-        // Capsule check: several points along body height for long-range hits
+        // Capsule check: generous hit volumes so long-range shots still register
         const base=bot.mesh.position;
         const points=[
-          {p:new THREE.Vector3(base.x, base.y+1.48, base.z), r:0.38, head:true},
-          {p:new THREE.Vector3(base.x, base.y+1.15, base.z), r:0.55, head:false},
-          {p:new THREE.Vector3(base.x, base.y+0.75, base.z), r:0.5, head:false},
-          {p:new THREE.Vector3(base.x, base.y+0.4, base.z), r:0.4, head:false}
+          {p:new THREE.Vector3(base.x, base.y+1.55, base.z), r:0.42, head:true},
+          {p:new THREE.Vector3(base.x, base.y+1.25, base.z), r:0.62, head:false},
+          {p:new THREE.Vector3(base.x, base.y+0.85, base.z), r:0.58, head:false},
+          {p:new THREE.Vector3(base.x, base.y+0.45, base.z), r:0.48, head:false}
         ];
         for(const pt of points){
           const to=pt.p.clone().sub(origin);const t=to.dot(dir);
-          if(t<0.3||t>bestT)continue;
-          // allow slightly wider cone at distance
-          const widen=0.15+Math.min(0.55, t*0.004);
+          if(t<0.25||t>bestT)continue;
+          // Widen hit cone with distance (crosshair pixels ≠ world units far away)
+          const widen=0.22+Math.min(1.35, t*0.009);
           const closest=origin.clone().add(dir.clone().multiplyScalar(t));
           if(closest.distanceTo(pt.p) <= pt.r + widen){
             bestT=t; best={bot,head:pt.head,t};
@@ -4388,23 +5139,56 @@ input{font-family:inherit}
         }
       }
       if(best){
-        const wallT=this.raycastWalls(origin,dir,best.t-0.35);
-        if(wallT < best.t-0.35) return null;
+        // Ignore low props/sandbags when aiming over them so distant hits register
+        const wallT=this.raycastWalls(origin,dir,best.t-0.2,{clearLow:true});
+        if(wallT < best.t-0.25) return null;
       }
       return best;
     },
-    raycastWalls(origin,dir,maxT){
-      // Sample along ray at chest-relevant height; skip floor trims (very low boxes)
-      const step=0.5;
-      for(let t=0.6;t<maxT;t+=step){
-        const p=origin.clone().add(dir.clone().multiplyScalar(t));
-        for(const c of this.colliders){
-          // ignore tiny floor trim / pads under 0.5 height
-          if((c.maxY-c.minY)<0.55 && c.maxY<0.6) continue;
-          if(p.x>c.minX&&p.x<c.maxX&&p.y>c.minY&&p.y<c.maxY&&p.z>c.minZ&&p.z<c.maxZ)return t;
+    raycastWalls(origin,dir,maxT,opts){
+      // Precise AABB slab raycast (works at long range; no missed/false sample hits)
+      opts=opts||{};
+      let best=maxT;
+      const ox=origin.x, oy=origin.y, oz=origin.z;
+      const dx=dir.x, dy=dir.y, dz=dir.z;
+      const endY=oy+dy*maxT;
+      for(const c of this.colliders){
+        const hh=c.maxY-c.minY;
+        // ignore tiny floor trim / pads
+        if(hh<0.55 && c.maxY<0.65) continue;
+        // shooting over low cover (sandbags, short crates, dumpsters)
+        if(opts.clearLow && hh<1.45 && oy>c.maxY+0.2 && endY>c.maxY+0.1){
+          const midY=oy+dy*(maxT*0.5);
+          if(midY>c.maxY+0.08) continue;
+        }
+        let tmin=0, tmax=maxT;
+        // X slab
+        if(Math.abs(dx)<1e-8){ if(ox<=c.minX||ox>=c.maxX) continue; }
+        else {
+          let t1=(c.minX-ox)/dx, t2=(c.maxX-ox)/dx;
+          if(t1>t2){const tmp=t1;t1=t2;t2=tmp;}
+          tmin=Math.max(tmin,t1); tmax=Math.min(tmax,t2); if(tmin>tmax) continue;
+        }
+        // Y slab
+        if(Math.abs(dy)<1e-8){ if(oy<=c.minY||oy>=c.maxY) continue; }
+        else {
+          let t1=(c.minY-oy)/dy, t2=(c.maxY-oy)/dy;
+          if(t1>t2){const tmp=t1;t1=t2;t2=tmp;}
+          tmin=Math.max(tmin,t1); tmax=Math.min(tmax,t2); if(tmin>tmax) continue;
+        }
+        // Z slab
+        if(Math.abs(dz)<1e-8){ if(oz<=c.minZ||oz>=c.maxZ) continue; }
+        else {
+          let t1=(c.minZ-oz)/dz, t2=(c.maxZ-oz)/dz;
+          if(t1>t2){const tmp=t1;t1=t2;t2=tmp;}
+          tmin=Math.max(tmin,t1); tmax=Math.min(tmax,t2); if(tmin>tmax) continue;
+        }
+        if(tmax>0.12 && tmin<best){
+          const hitT=tmin>0.12?tmin:tmax;
+          if(hitT>0.12 && hitT<best) best=hitT;
         }
       }
-      return maxT;
+      return best;
     },
     damageBot(bot,dmg,hs){
       if(!bot.alive)return;
@@ -4415,7 +5199,7 @@ input{font-family:inherit}
     },
     killBot(bot, opts){
       if(!bot.alive)return;
-      bot.alive=false;bot.hp=0;bot.mesh.visible=false;bot.respawnAt=performance.now()+3500;
+      bot.alive=false;bot.hp=0;
       this.botDeaths[bot.name]=(this.botDeaths[bot.name]||0)+1;
       const byPlayer = !(opts && opts.byBot);
       if(byPlayer){
@@ -4429,12 +5213,20 @@ input{font-family:inherit}
       this.updateHUD();AudioFX.death();
       if(bot.hasBomb&&!this.bomb.planted){bot.hasBomb=false;const other=this.bots.find(b=>b.team==='T'&&b.alive);if(other){other.hasBomb=true;this.bomb.carrier=other;other.plantTarget=bot.plantTarget;}}
       if(MODES[this.mode].bomb&&!this.round.over)this.checkRoundEnd();
+      const anim=bot.mesh&&bot.mesh.userData&&bot.mesh.userData.anim;
+      bot.respawnAt=performance.now()+3500;
+      if(anim&&anim.playOneShot('death')){
+        anim.onDeathEnd=()=>{ if(bot.mesh) bot.mesh.visible=false; };
+      } else if(bot.mesh){
+        bot.mesh.visible=false;
+      }
     },
     respawnBot(bot){
       if(MODES[this.mode].bomb)return; // no mid-round respawn in bomb
       const wp=this.waypoints[Math.floor(Math.random()*this.waypoints.length)].clone();
       bot.mesh.position.set(wp.x,0,wp.z);bot.mesh.visible=true;bot.hp=100;bot.alive=true;bot.state='patrol';
       bot.mesh.rotation.set(0,0,0);
+      if(bot.mesh.userData&&bot.mesh.userData.anim) bot.mesh.userData.anim.resetToIdle();
     },
     showHitmarker(){
       if(save.settings.hitmarker===false)return;
@@ -4608,7 +5400,7 @@ input{font-family:inherit}
     },
     canSee(from,to){
       const dir=to.clone().sub(from);const dist=dir.length();if(dist<0.1)return true;dir.normalize();
-      if(this.raycastWalls(from,dir,dist)<dist-1.2)return false;
+      if(this.raycastWalls(from,dir,dist,{clearLow:true})<dist-0.9)return false;
       // smoke blocks vision
       const steps=Math.max(2, Math.floor(dist/1.5));
       for(let i=1;i<steps;i++){
@@ -4815,94 +5607,141 @@ input{font-family:inherit}
           if(pos.distanceTo(bot.flankWp)<2.2) bot.flankWp=null;
         } else if(targetPos) moveTarget=targetPos;
 
-        // combat movement: strafe + keep distance / push
+        // combat movement: accel/friction (CS-like), strafe + keep distance
+        if(!bot.vel) bot.vel=new THREE.Vector3();
+        const wish=new THREE.Vector3();
         if(moveTarget&&this.round.freeze<=0){
           const to=new THREE.Vector3(moveTarget.x-pos.x,0,moveTarget.z-pos.z);
-          const distTo=to.length();
           let dir=to.length()>0.01?to.normalize():new THREE.Vector3(Math.sin(bot.facing),0,Math.cos(bot.facing));
           if(bot.state==='attack' && hasLOS){
             const right=new THREE.Vector3(dir.z,0,-dir.x).multiplyScalar(bot.strafeDir);
             if(combatDist<9){
-              // backpedal while strafing
               dir=dir.multiplyScalar(-0.55).add(right.multiplyScalar(0.85)).normalize();
             } else if(combatDist<22){
               dir=dir.multiplyScalar(0.25).add(right.multiplyScalar(0.95)).normalize();
             } else {
               dir=dir.multiplyScalar(0.75).add(right.multiplyScalar(0.55)).normalize();
             }
-            if(bot.coverT>0){
-              // short peek pause — slide sideways only
-              dir=right.normalize();
-            }
+            if(bot.coverT>0) dir=right.normalize();
           }
-          const speed=bot.state==='patrol'?bot.speed*0.55:(bot.state==='attack'?bot.speed*(0.7+skill*0.15):bot.speed*0.9);
-          const next=pos.clone().add(dir.clone().multiplyScalar(speed*dt)); next.y=0;
-          this.resolveCollision(next,0.4); pos.x=next.x; pos.z=next.z;
-          if(hasLOS && (shootPlayer||targetBot)){
-            const look=shootPlayer?this.player.pos:(targetBot.mesh.position);
-            this.setBotFacing(bot,look.x,look.z);
-          } else {
-            this.setBotFacing(bot,pos.x+dir.x*2,pos.z+dir.z*2);
-          }
-          bot.moving=true; bot.walkPhase=(bot.walkPhase||0)+dt*speed*2.4;
+          wish.copy(dir);
+        }
+        const maxSp=bot.state==='patrol'?(bot.speed||5.6)*0.55
+          :(bot.state==='attack'?(bot.speed||5.6)*(0.72+skill*0.18)
+          :(bot.speed||5.6)*0.9);
+        const accel=bot.state==='attack'?38:28;
+        const friction=9.5;
+        if(wish.lengthSq()>0.0001){
+          // accelerate toward wish
+          const currentSpeed=bot.vel.dot(wish);
+          const addSp=Math.max(0, maxSp-currentSpeed);
+          const accelSp=Math.min(addSp, accel*dt);
+          bot.vel.x+=wish.x*accelSp; bot.vel.z+=wish.z*accelSp;
         } else {
-          bot.moving=false;
-          if(hasLOS && (shootPlayer||targetBot)){
-            const look=shootPlayer?this.player.pos:(targetBot.mesh.position);
-            this.setBotFacing(bot,look.x,look.z);
-          }
+          // ground friction
+          const sp=Math.hypot(bot.vel.x, bot.vel.z);
+          if(sp>0.01){
+            const drop=Math.min(sp, friction*dt);
+            bot.vel.x*=(sp-drop)/sp; bot.vel.z*=(sp-drop)/sp;
+          } else { bot.vel.x=0; bot.vel.z=0; }
+        }
+        // clamp
+        const sp2=Math.hypot(bot.vel.x, bot.vel.z);
+        if(sp2>maxSp*1.15){ bot.vel.x*=maxSp*1.15/sp2; bot.vel.z*=maxSp*1.15/sp2; }
+        if(this.round.freeze>0){ bot.vel.x=0; bot.vel.z=0; }
+        const next=pos.clone(); next.x+=bot.vel.x*dt; next.z+=bot.vel.z*dt; next.y=0;
+        this.resolveCollision(next,0.4); pos.x=next.x; pos.z=next.z;
+        const speedNow=Math.hypot(bot.vel.x, bot.vel.z);
+        bot.moving=speedNow>0.45;
+        if(bot.moving) bot.walkPhase=(bot.walkPhase||0)+dt*speedNow*0.85;
+        if(hasLOS && (shootPlayer||targetBot)){
+          const look=shootPlayer?this.player.pos:(targetBot.mesh.position);
+          this.setBotFacing(bot,look.x,look.z);
+        } else if(bot.moving){
+          this.setBotFacing(bot,pos.x+bot.vel.x,pos.z+bot.vel.z);
         }
 
-        const L=bot.mesh.userData.limbs;
-        if(L){
-          const swing=bot.moving?Math.sin(bot.walkPhase)*0.55:Math.sin(performance.now()*0.002+bot.id)*0.04;
-          L.leftLeg.rotation.x=swing; L.rightLeg.rotation.x=-swing;
-          L.leftArm.rotation.x=-swing*0.55; L.rightArm.rotation.x=0.35+swing*0.25;
-          L.torsoG.rotation.y=bot.moving?Math.sin(bot.walkPhase*0.5)*0.04:0;
-          L.headG.rotation.x=bot.state==='attack'?-0.08:0;
+        // close-range knife swap (CS-style)
+        if(bot.state==='attack' && combatDist>0 && combatDist<2.4 && bot.weapon!=='knife'){
+          bot._prevGun=bot.weapon; this.equipBotWeapon(bot,'knife');
+        } else if(bot.weapon==='knife' && (combatDist>3.2 || bot.state==='patrol') && bot._prevGun){
+          this.equipBotWeapon(bot, bot._prevGun); bot._prevGun=null;
+        }
+
+        const anim=bot.mesh.userData&&bot.mesh.userData.anim;
+        const wType=(WEAPONS[bot.weapon]&&WEAPONS[bot.weapon].type)||'rifle';
+        if(anim){
+          anim.update(dt);
+          if(bot.alive && !anim.locked){
+            if(bot.moving){
+              anim.setState(speedNow>4.2?'run':'walk');
+            } else if((bot.state==='attack' || (bot.engageT||0)>0) && wType!=='melee'){
+              anim.setState('aim');
+            } else {
+              anim.setState('idle');
+            }
+          }
+        } else {
+          const L=bot.mesh.userData.limbs;
+          if(L){
+            const swing=bot.moving?Math.sin(bot.walkPhase)*0.55:Math.sin(performance.now()*0.002+bot.id)*0.04;
+            L.leftLeg.rotation.x=swing; L.rightLeg.rotation.x=-swing;
+            L.leftArm.rotation.x=-swing*0.55; L.rightArm.rotation.x=0.35+swing*0.25;
+            L.torsoG.rotation.y=bot.moving?Math.sin(bot.walkPhase*0.5)*0.04:0;
+            L.headG.rotation.x=bot.state==='attack'?-0.08:0;
+          }
         }
 
         // --- shooting (same damage as before) ---
         if(this.round.freeze>0||bot.shootCd>0)continue;
         if(bot.blindUntil && performance.now()<bot.blindUntil) continue;
         const eye=pos.clone();eye.y+=1.45;
+        const bw=WEAPONS[bot.weapon]||WEAPONS.ak;
+        const maxRange=bw.type==='melee'?(bw.range||2.4):75;
 
         const tryShootAt=(aimPos, onHit)=>{
           const dist=pos.distanceTo(new THREE.Vector3(aimPos.x,pos.y,aimPos.z));
-          if(dist>75||!this.canSee(eye,aimPos)) return false;
+          if(dist>maxRange||!this.canSee(eye,aimPos)) return false;
           this.setBotFacing(bot,aimPos.x,aimPos.z);
-          // reaction gate
           bot.aimHold=(bot.aimHold||0)+dt;
           if(bot.aimHold < (bot.reaction||0.3)*(1.35-skill*0.25)) return true;
-          bot.shootCd=(0.55+Math.random()*0.5)*(1.25-skill*0.15);
+          const fireCd=bw.type==='melee'?0.55:((0.55+Math.random()*0.5)*(1.25-skill*0.15));
+          bot.shootCd=fireCd;
           bot.engageT=0.8;
-          const acc=Math.max(0.1,(0.18+skill*0.28)*(1-dist/85));
+          if(anim) anim.playOneShot('shoot', wType==='melee'?'idle':'aim');
+          const acc=bw.type==='melee'?0.85:Math.max(0.1,(0.18+skill*0.28)*(1-dist/85));
           const from=eye.clone();
           const dir=aimPos.clone().sub(from).normalize();
           if(Math.random()<acc){
             onHit();
-            this.spawnTracer(from,dir,Math.min(80,dist+5));
-          } else {
+            if(bw.type!=='melee') this.spawnTracer(from,dir,Math.min(80,dist+5));
+          } else if(bw.type!=='melee'){
             dir.x+=(Math.random()-0.5)*(0.18-skill*0.04);
             dir.y+=(Math.random()-0.5)*(0.12-skill*0.03);
             this.spawnTracer(from,dir.normalize(),Math.min(80,dist+5));
           }
-          AudioFX.beep(160,.05,'sawtooth',.035);
+          AudioFX.beep(bw.type==='melee'?220:160,.05,bw.type==='melee'?'square':'sawtooth',.035);
           if(Math.random()<0.28) bot.coverT=0.35+Math.random()*0.45;
+          bot._shots=(bot._shots||0)+1;
+          if(anim && bw.type!=='melee' && bot._shots>=12+Math.floor(Math.random()*8)){
+            bot._shots=0;
+            setTimeout(()=>{ if(bot.alive&&bot.mesh&&bot.mesh.userData.anim) bot.mesh.userData.anim.playOneShot('reload'); }, 120);
+          }
           return true;
         };
 
+        const dmgBase=bw.type==='melee'?28:(7+Math.random()*7);
         if(shootPlayer&&this.player.alive){
           const pEye=this.player.pos.clone();
           if(this.player.vel){
             pEye.x+=this.player.vel.x*0.03*skill;
             pEye.z+=this.player.vel.z*0.03*skill;
           }
-          tryShootAt(pEye, ()=>this.damagePlayer(7+Math.random()*7,bot));
+          tryShootAt(pEye, ()=>this.damagePlayer(dmgBase,bot));
         } else if(targetBot&&targetBot.alive&&hasLOS){
           const tPos=targetBot.mesh.position.clone(); tPos.y+=1.4;
           tryShootAt(tPos, ()=>{
-            targetBot.hp-=9;
+            targetBot.hp-=(bw.type==='melee'?32:9);
             targetBot.lastHurt=now;
             if(targetBot.hp<=0)this.killBot(targetBot,{byBot:true,killer:bot});
           });
@@ -4990,16 +5829,49 @@ input{font-family:inherit}
         if(this.keys['KeyW'])wish.add(forward);if(this.keys['KeyS'])wish.sub(forward);
         if(this.keys['KeyD'])wish.add(right);if(this.keys['KeyA'])wish.sub(right);
         if(wish.lengthSq()>0)wish.normalize();
-        let speed=(this.keys['ShiftLeft']||this.keys['ShiftRight'])?3.4:7.8;
-        if(this.crouching) speed*=0.5;
-        this.player.vel.x=wish.x*speed;this.player.vel.z=wish.z*speed;
-        if(this.keys['Space']&&this.player.onGround&&!this.crouching){this.player.vel.y=10.2;this.player.onGround=false;}
-        this.player.vel.y-=18*dt;
+        // CS-like speeds: run ~250u → ~6.0, walk ~130 → ~3.4, crouch ~0.34
+        let wishSpeed=(this.keys['ShiftLeft']||this.keys['ShiftRight'])?3.4:6.0;
+        if(this.crouching) wishSpeed*=0.34;
+        const onGround=this.player.onGround;
+        const friction=8.5, stopSpeed=1.5;
+        const accel=onGround?42:12;
+        // ground friction (always when grounded)
+        if(onGround){
+          const sp=Math.hypot(this.player.vel.x, this.player.vel.z);
+          if(sp>0.01){
+            const control=sp<stopSpeed?stopSpeed:sp;
+            const drop=Math.min(sp, control*friction*dt);
+            const ns=(sp-drop)/sp;
+            this.player.vel.x*=ns; this.player.vel.z*=ns;
+          } else { this.player.vel.x=0; this.player.vel.z=0; }
+        }
+        // accelerate toward wish
+        if(wish.lengthSq()>0.0001){
+          const currentSpeed=this.player.vel.x*wish.x+this.player.vel.z*wish.z;
+          const addSp=wishSpeed-currentSpeed;
+          if(addSp>0){
+            const accelSp=Math.min(addSp, accel*wishSpeed*dt);
+            this.player.vel.x+=wish.x*accelSp;
+            this.player.vel.z+=wish.z*accelSp;
+          }
+        }
+        // soft clamp (surf leftover)
+        const sp2=Math.hypot(this.player.vel.x, this.player.vel.z);
+        const cap=wishSpeed*1.25+(onGround?0:1.5);
+        if(sp2>cap){ this.player.vel.x*=cap/sp2; this.player.vel.z*=cap/sp2; }
+        // jump ~CS ratio to walk speed; gravity slightly snappier
+        if(this.keys['Space']&&this.player.onGround&&!this.crouching){
+          this.player.vel.y=7.8; this.player.onGround=false;
+        }
+        this.player.vel.y-=20*dt;
         const next=this.player.pos.clone();next.x+=this.player.vel.x*dt;next.z+=this.player.vel.z*dt;
         this.resolveCollision(next,this.player.radius);next.y+=this.player.vel.y*dt;
         const floorY=this.crouching?(this.player.crouchH||1.15):(this.player.standingH||1.7);
         if(next.y<=floorY){next.y=floorY;this.player.vel.y=0;this.player.onGround=true;}
         this.player.pos.copy(next);
+      } else if(this.player.onGround){
+        // stop when frozen / buy menu
+        this.player.vel.x*=Math.max(0,1-10*dt); this.player.vel.z*=Math.max(0,1-10*dt);
       }
 
       this.camera.position.copy(this.player.pos);
@@ -5012,12 +5884,13 @@ input{font-family:inherit}
       }
       this.camera.rotation.order='YXZ';this.camera.rotation.y=this.yaw;this.camera.rotation.x=this.pitch-this.recoilPitch;
 
-      // footsteps + crosshair bloom decay
-      const movingNow=wish.lengthSq()>0&&this.player.onGround&&!frozen&&!this.buyOpen;
+      // footsteps + crosshair bloom decay (by actual speed)
+      const moveSp=Math.hypot(this.player.vel.x,this.player.vel.z);
+      const movingNow=moveSp>0.6&&this.player.onGround&&!frozen&&!this.buyOpen;
       if(movingNow){
         this.xhBloom=Math.min(1,this.xhBloom+dt*0.8);
         this.footTimer=(this.footTimer||0)+dt;
-        const stepEvery=(this.keys['ShiftLeft']||this.keys['ShiftRight'])?0.55:0.36;
+        const stepEvery=moveSp<3.8?0.52:0.34;
         if(this.footTimer>=stepEvery){this.footTimer=0;AudioFX.foot();}
       } else {
         this.xhBloom=Math.max(0,this.xhBloom-dt*1.6);
@@ -5026,7 +5899,7 @@ input{font-family:inherit}
 
       // Weapon viewmodel — strong reload animation
       if(this.weaponMesh){
-        const moving=wish.lengthSq()>0&&this.player.onGround&&!frozen;
+        const moving=moveSp>0.6&&this.player.onGround&&!frozen;
         const bobAmt=(save.settings.weaponBob!==undefined?save.settings.weaponBob:1);
         this.weaponBob+=dt*(moving?11:2);
         const bobY=moving?Math.sin(this.weaponBob)*0.012*bobAmt:0;
@@ -5359,6 +6232,9 @@ input{font-family:inherit}
   bootLobby();
   window.__boot = 'done';
 })();
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', bootCS3);
+else bootCS3();
 </script>
 </body>
 </html>
