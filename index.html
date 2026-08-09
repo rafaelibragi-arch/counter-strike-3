@@ -1253,6 +1253,19 @@ window.__cs3Booted = true;
   };
   const CASE_KEY_PRICE = 1000;
   const FREEZE_TIME = 15;
+  // Shared human/CS-like movement (units ≈ Source 250u → 6)
+  // Quake accel uses (accel * wishSpeed * dt): keep accel ~5–7 like sv_accelerate
+  const MOVE = {
+    run:6, walk:3.4, crouchMul:0.34,
+    groundAccel:7, airAccel:1.4,
+    friction:6.2, stopSpeed:1.6,
+    jumpVel:6.0, gravity:22,
+    bodyY:0.9, radius:0.4,
+    turnRate:8.5,       // rad/s body turn when locomoting
+    aimTurnRate:12,     // faster when standing aim
+    landDamp:0.82,      // horizontal absorb on landing
+    arriveDist:2.4      // slow near waypoints
+  };
   const STORAGE_KEY = 'cs3_browser_save_v1';
   function defaultSave(){
     return {nickname:'Player',level:1,xp:0,balance:5000,avatar:null,keys:1,
@@ -2499,22 +2512,23 @@ window.__cs3Booted = true;
     const rName=rArm?rArm.name:null;
     const lName=lArm?lArm.name:null;
     if(spineName&&rName&&lName){
-      clips.push(new THREE.AnimationClip('AimIdle', 1.0, [
-        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,1], quatVals([[0.08,0,0],[0.1,0,0]])),
-        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,1], quatVals([[1.15,-0.15,0.2],[1.2,-0.12,0.22]])),
-        new THREE.QuaternionKeyframeTrack(lName+'.quaternion', [0,1], quatVals([[1.05,0.25,-0.15],[1.1,0.22,-0.12]]))
+      // Calm aim hold — static-ish, no arm-flapping loop
+      clips.push(new THREE.AnimationClip('AimIdle', 2.0, [
+        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,2], quatVals([[0.06,0.02,0],[0.07,0.02,0]])),
+        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,2], quatVals([[0.55,-0.08,0.12],[0.56,-0.07,0.12]])),
+        new THREE.QuaternionKeyframeTrack(lName+'.quaternion', [0,2], quatVals([[0.45,0.12,-0.08],[0.46,0.11,-0.08]]))
       ]));
       const shootTracks=[
-        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,0.07,0.28], quatVals([[0.08,0,0],[-0.12,0.04,0.06],[0.08,0,0]])),
-        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,0.07,0.28], quatVals([[1.15,-0.15,0.2],[0.95,-0.05,0.35],[1.15,-0.15,0.2]]))
+        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,0.07,0.28], quatVals([[0.06,0.02,0],[-0.08,0.04,0.05],[0.06,0.02,0]])),
+        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,0.07,0.28], quatVals([[0.55,-0.08,0.12],[0.4,-0.02,0.25],[0.55,-0.08,0.12]]))
       ];
-      if(rFore) shootTracks.push(new THREE.QuaternionKeyframeTrack(rFore.name+'.quaternion', [0,0.07,0.28], quatVals([[0.2,0,0],[0.45,0,0],[0.2,0,0]])));
+      if(rFore) shootTracks.push(new THREE.QuaternionKeyframeTrack(rFore.name+'.quaternion', [0,0.07,0.28], quatVals([[0.15,0,0],[0.35,0,0],[0.15,0,0]])));
       clips.push(new THREE.AnimationClip('Shoot', 0.28, shootTracks));
       const reloadTracks=[
-        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,0.35,0.9,1.6], quatVals([[1.15,-0.15,0.2],[0.6,0.4,0.5],[0.5,-0.3,0.8],[1.15,-0.15,0.2]])),
-        new THREE.QuaternionKeyframeTrack(lName+'.quaternion', [0,0.4,1.0,1.6], quatVals([[1.05,0.25,-0.15],[0.7,-0.5,0.3],[0.55,-0.2,0.55],[1.05,0.25,-0.15]]))
+        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,0.35,0.9,1.6], quatVals([[0.55,-0.08,0.12],[0.35,0.35,0.4],[0.3,-0.2,0.55],[0.55,-0.08,0.12]])),
+        new THREE.QuaternionKeyframeTrack(lName+'.quaternion', [0,0.4,1.0,1.6], quatVals([[0.45,0.12,-0.08],[0.5,-0.35,0.2],[0.4,-0.15,0.35],[0.45,0.12,-0.08]]))
       ];
-      if(lFore) reloadTracks.push(new THREE.QuaternionKeyframeTrack(lFore.name+'.quaternion', [0,0.45,1.1,1.6], quatVals([[0.15,0,0],[0.9,0.2,0],[0.6,0,0],[0.15,0,0]])));
+      if(lFore) reloadTracks.push(new THREE.QuaternionKeyframeTrack(lFore.name+'.quaternion', [0,0.45,1.1,1.6], quatVals([[0.1,0,0],[0.7,0.15,0],[0.45,0,0],[0.1,0,0]])));
       clips.push(new THREE.AnimationClip('Reload', 1.6, reloadTracks));
     } else {
       // Fallback: subtle root pitch so states still exist
@@ -2530,17 +2544,25 @@ window.__cs3Booted = true;
     }
     if(hips){
       const pos0=hips.position.clone();
-      clips.push(new THREE.AnimationClip('Death', 1.35, [
-        new THREE.QuaternionKeyframeTrack(hips.name+'.quaternion', [0,0.35,0.85,1.35], quatVals([[0,0,0],[0.4,0.6,0.2],[1.2,0.9,0.1],[1.45,1.1,0]])),
-        new THREE.VectorKeyframeTrack(hips.name+'.position', [0,0.5,1.35], [
-          pos0.x,pos0.y,pos0.z,
-          pos0.x,pos0.y*0.55,pos0.z+0.15,
-          pos0.x,0.05,pos0.z+0.35
+      // Clear fall: tip over + hips drop so death reads from any angle
+      clips.push(new THREE.AnimationClip('Death', 1.5, [
+        new THREE.QuaternionKeyframeTrack(hips.name+'.quaternion', [0,0.25,0.7,1.5], quatVals([
+          [0,0,0],
+          [0.55,0.15,0.35],
+          [1.15,0.25,0.85],
+          [1.35,0.1,1.15]
+        ])),
+        new THREE.VectorKeyframeTrack(hips.name+'.position', [0,0.35,0.9,1.5], [
+          pos0.x, pos0.y, pos0.z,
+          pos0.x+0.05, pos0.y*0.7, pos0.z+0.12,
+          pos0.x+0.12, pos0.y*0.25, pos0.z+0.35,
+          pos0.x+0.18, 0.02, pos0.z+0.55
         ])
       ]));
     } else {
-      clips.push(new THREE.AnimationClip('Death', 1.0, [
-        new THREE.VectorKeyframeTrack('.position', [0,0.5,1.0], [0,0,0, 0,-0.4,0.2, 0,-0.85,0.35])
+      clips.push(new THREE.AnimationClip('Death', 1.2, [
+        new THREE.VectorKeyframeTrack('.position', [0,0.4,1.2], [0,0,0, 0,-0.5,0.25, 0,-0.95,0.45]),
+        new THREE.QuaternionKeyframeTrack('.quaternion', [0,0.4,1.2], quatVals([[0,0,0],[1.0,0,0.4],[1.4,0,0.2]]))
       ]));
     }
     return clips;
@@ -2719,8 +2741,30 @@ window.__cs3Booted = true;
     const prev=this.actions[this.state];
     const next=this.actions[state];
     if(prev&&prev!==next) prev.fadeOut(this._fade);
-    next.reset().setEffectiveWeight(1).fadeIn(this._fade).play();
+    // Hard-clear combat poses when returning to idle so arms don't keep flapping
+    if(state==='idle'){
+      ['aim','shoot','reload','walk','run'].forEach(k=>{
+        const a=this.actions[k];
+        if(a){ a.fadeOut(0.12); a.setEffectiveTimeScale(1); }
+      });
+    }
+    next.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).fadeIn(this._fade).play();
     this.state=state;
+  };
+  /** Match walk/run clip speed to actual |v| so feet don't skate. */
+  CharacterAnim.prototype.setLocomotion=function(state, speed){
+    if(state!=='walk'&&state!=='run'){ this.setState(state); return; }
+    const prev=this.state;
+    this.setState(state);
+    const a=this.actions[this.state];
+    if(!a) return;
+    const ref=state==='run'?5.4:2.7;
+    const ts=Math.max(0.55, Math.min(1.4, (speed||0)/ref));
+    a.setEffectiveTimeScale(ts);
+    // restore default scale when leaving loco later
+    if(prev!=='walk'&&prev!=='run'){
+      ['idle','aim'].forEach(k=>{ const x=this.actions[k]; if(x) x.setEffectiveTimeScale(1); });
+    }
   };
   CharacterAnim.prototype.playOneShot=function(name, afterState){
     const action=this.actions[name];
@@ -4549,7 +4593,8 @@ window.__cs3Booted = true;
         const sp=spList[0].clone();
         const allyTeam=side, enemyTeam=side==='CT'?'T':'CT';
         this.matchMoney=800;
-        this.player={pos:new THREE.Vector3(sp.x,1.7,sp.z),vel:new THREE.Vector3(),hp:100,armor:0,alive:true,respawnTimer:0,radius:0.4,onGround:true,team:side,money:800,standingH:1.7,crouchH:1.15,hasKit:false};
+        this.player={pos:new THREE.Vector3(sp.x,1.7,sp.z),vel:new THREE.Vector3(),hp:100,armor:0,alive:true,respawnTimer:0,radius:MOVE.radius,onGround:true,team:side,money:800,standingH:1.7,crouchH:1.15,eyeH:1.7,hasKit:false};
+        this.jumpHeld=false;
         this.yaw=side==='CT'?Math.PI:0;
         this.currentWeapon='pistol';
         for(let i=0;i<m.allies;i++)this.spawnBot(i,allyTeam,true);
@@ -4564,7 +4609,8 @@ window.__cs3Booted = true;
       } else {
         // DM: start with AK like warm-up
         this.matchMoney=16000;const dmSp=(this.tSpawns&&this.tSpawns[0])?this.tSpawns[0]:new THREE.Vector3(-8,0,28);
-        this.player={pos:new THREE.Vector3(dmSp.x,1.7,dmSp.z),vel:new THREE.Vector3(),hp:100,armor:100,alive:true,respawnTimer:0,radius:0.4,onGround:true,team:'ffa',money:16000,standingH:1.7,crouchH:1.15,hasKit:false};
+        this.player={pos:new THREE.Vector3(dmSp.x,1.7,dmSp.z),vel:new THREE.Vector3(),hp:100,armor:100,alive:true,respawnTimer:0,radius:MOVE.radius,onGround:true,team:'ffa',money:16000,standingH:1.7,crouchH:1.15,eyeH:1.7,hasKit:false};
+        this.jumpHeld=false;
         this.yaw=0.15;
         this.loadout.primary='ak';
         this.ammo.ak={mag:WEAPONS.ak.magSize,reserve:WEAPONS.ak.reserve};
@@ -4596,11 +4642,17 @@ window.__cs3Booted = true;
       if(!this.ammo.pistol && !this.ammo.deagle) this.ammo.pistol={mag:WEAPONS.pistol.magSize,reserve:WEAPONS.pistol.reserve};
       const side=this.player.team||this.playerSide;
       const spList=side==='T'?this.tSpawns:this.ctSpawns;
-      const sp=spList[0];this.player.pos.set(sp.x,1.7,sp.z);this.yaw=side==='CT'?Math.PI:0;this.pitch=0;
+      const sp=spList[0];this.player.pos.set(sp.x,1.7,sp.z);this.player.vel.set(0,0,0);
+      this.player.eyeH=this.player.standingH||1.7; this.player.onGround=true; this.jumpHeld=false; this.crouching=false;
+      this.yaw=side==='CT'?Math.PI:0;this.pitch=0;
       this.bots.forEach((b,i)=>{
         b.hp=100;b.alive=true;b.mesh.visible=true;b.state='patrol';b.plantProgress=0;b.blindUntil=0;
+        b.falling=false; b.fallT=0;
+        if(b.vel) b.vel.set(0,0,0);
         const list=b.team==='CT'?this.ctSpawns:this.tSpawns;
         const p=list[i%list.length];b.mesh.position.set(p.x,0,p.z);b.mesh.rotation.set(0,b.team==='CT'?0:Math.PI,0);
+        b.facing=b.mesh.rotation.y;
+        if(b.mesh.userData&&b.mesh.userData.head) b.mesh.userData.head.rotation.set(0,0,0);
         if(b.mesh.userData&&b.mesh.userData.anim) b.mesh.userData.anim.resetToIdle();
       });
       this.bots.forEach(b=>b.hasBomb=false);
@@ -4640,7 +4692,7 @@ window.__cs3Booted = true;
       const bot={id:index,name:(ally?'Ally ':'')+(team==='CT'?'CT':'T')+' '+(index%10+1),
         mesh,team:team==='enemy'?'enemy':team,ally:!!ally,hp:100,alive:true,respawnAt:0,
         state:'patrol',targetWp:Math.floor(Math.random()*this.waypoints.length),
-        shootCd:0,speed:5.6+Math.random()*0.7, maxSpeed:6.2, reaction:0.28+Math.random()*0.35,lastHurt:0,
+        shootCd:0,speed:5.6+Math.random()*0.7, reaction:0.28+Math.random()*0.35,lastHurt:0,
         hasBomb:false,plantTarget:Math.random()<0.5?'A':'B',plantProgress:0,
         facing:team==='CT'?0:Math.PI,
         walkPhase:Math.random()*Math.PI*2,moving:false,
@@ -5200,6 +5252,8 @@ window.__cs3Booted = true;
     killBot(bot, opts){
       if(!bot.alive)return;
       bot.alive=false;bot.hp=0;
+      bot.vel&&bot.vel.set(0,0,0);
+      bot.fallT=0; bot.falling=true;
       this.botDeaths[bot.name]=(this.botDeaths[bot.name]||0)+1;
       const byPlayer = !(opts && opts.byBot);
       if(byPlayer){
@@ -5214,18 +5268,37 @@ window.__cs3Booted = true;
       if(bot.hasBomb&&!this.bomb.planted){bot.hasBomb=false;const other=this.bots.find(b=>b.team==='T'&&b.alive);if(other){other.hasBomb=true;this.bomb.carrier=other;other.plantTarget=bot.plantTarget;}}
       if(MODES[this.mode].bomb&&!this.round.over)this.checkRoundEnd();
       const anim=bot.mesh&&bot.mesh.userData&&bot.mesh.userData.anim;
-      bot.respawnAt=performance.now()+3500;
-      if(anim&&anim.playOneShot('death')){
-        anim.onDeathEnd=()=>{ if(bot.mesh) bot.mesh.visible=false; };
-      } else if(bot.mesh){
-        bot.mesh.visible=false;
+      bot.respawnAt=performance.now()+4500;
+      if(bot.mesh){
+        bot.fallAxis=(Math.random()<0.5?1:-1);
+        bot.fallYaw=bot.facing!=null?bot.facing:bot.mesh.rotation.y;
+        // Death flash so kill is obvious
+        bot.mesh.traverse(o=>{
+          if(o.isMesh&&o.material&&o.material.emissive){
+            o.material.emissive.setHex(0x661100);
+            setTimeout(()=>{ if(o.material) o.material.emissive.setHex(0); }, 220);
+          }
+        });
+        // Drop gun visually with the body
+        const gun=bot.mesh.userData.gun;
+        if(gun) gun.visible=true;
+      }
+      if(anim){
+        // Stop loco/aim so death isn't fighting walk arms
+        ['idle','walk','run','aim','shoot','reload'].forEach(k=>{
+          const a=anim.actions[k]; if(a) a.stop();
+        });
+        anim.playOneShot('death');
       }
     },
     respawnBot(bot){
       if(MODES[this.mode].bomb)return; // no mid-round respawn in bomb
       const wp=this.waypoints[Math.floor(Math.random()*this.waypoints.length)].clone();
       bot.mesh.position.set(wp.x,0,wp.z);bot.mesh.visible=true;bot.hp=100;bot.alive=true;bot.state='patrol';
-      bot.mesh.rotation.set(0,0,0);
+      bot.falling=false; bot.fallT=0;
+      bot.mesh.rotation.set(0, bot.team==='CT'?0:Math.PI, 0);
+      bot.facing=bot.mesh.rotation.y;
+      if(bot.mesh.userData&&bot.mesh.userData.head) bot.mesh.userData.head.rotation.set(0,0,0);
       if(bot.mesh.userData&&bot.mesh.userData.anim) bot.mesh.userData.anim.resetToIdle();
     },
     showHitmarker(){
@@ -5331,6 +5404,7 @@ window.__cs3Booted = true;
       const spawns=[...(this.waypoints||[]),...(this.tSpawns||[]),...(this.ctSpawns||[])];
       const sp=spawns.length?spawns[Math.floor(Math.random()*spawns.length)]:new THREE.Vector3(-8,0,28);
       this.player.pos.set(sp.x,1.7,sp.z);this.player.vel.set(0,0,0);this.player.hp=100;this.player.armor=100;
+      this.player.eyeH=this.player.standingH||1.7; this.player.onGround=true; this.jumpHeld=false;
       this.player.alive=true;this.yaw=Math.random()*Math.PI*2;this.pitch=0;
       Object.keys(this.ammo).forEach(id=>{const w=WEAPONS[id];if(w)this.ammo[id]={mag:w.magSize,reserve:w.reserve};});
       if(!this.loadout.primary&&!this.ammo.pistol){
@@ -5389,14 +5463,48 @@ window.__cs3Booted = true;
       document.getElementById('bombWarn').classList.add('show');AudioFX.bomb();this.showBanner('BOMB PLANTED');
     },
 
-    resolveCollision(pos,radius){
+    applyGroundFriction(vel, dt){
+      const friction=MOVE.friction, stopSpeed=MOVE.stopSpeed;
+      const sp=Math.hypot(vel.x, vel.z);
+      if(sp>0.01){
+        const control=sp<stopSpeed?stopSpeed:sp;
+        const drop=Math.min(sp, control*friction*dt);
+        const ns=(sp-drop)/sp;
+        vel.x*=ns; vel.z*=ns;
+      } else { vel.x=0; vel.z=0; }
+    },
+    accelerateXZ(vel, wishDir, wishSpeed, accel, dt){
+      if(!wishDir||wishSpeed<=0||wishDir.lengthSq()<0.0001) return;
+      const currentSpeed=vel.x*wishDir.x+vel.z*wishDir.z;
+      const addSp=wishSpeed-currentSpeed;
+      if(addSp<=0) return;
+      const accelSp=Math.min(addSp, accel*wishSpeed*dt);
+      vel.x+=wishDir.x*accelSp;
+      vel.z+=wishDir.z*accelSp;
+    },
+    /** bodyY = capsule center for AABB filter; vel optional — kill into-wall component */
+    resolveCollision(pos,radius,vel,bodyY){
+      const by=(bodyY==null?pos.y:bodyY);
       for(const c of this.colliders){
-        if(pos.y<c.minY-0.2||pos.y-1.5>c.maxY)continue;
+        if(by<c.minY-0.2||by-1.5>c.maxY)continue;
         const nx=Math.max(c.minX,Math.min(pos.x,c.maxX)),nz=Math.max(c.minZ,Math.min(pos.z,c.maxZ));
         const dx=pos.x-nx,dz=pos.z-nz,d2=dx*dx+dz*dz;
-        if(d2<radius*radius){const d=Math.sqrt(d2)||0.0001;const push=radius-d;pos.x+=(dx/d)*push;pos.z+=(dz/d)*push;}
+        if(d2<radius*radius){
+          const d=Math.sqrt(d2)||0.0001;
+          const px=dx/d, pz=dz/d;
+          const push=radius-d;
+          pos.x+=px*push; pos.z+=pz*push;
+          if(vel){
+            const vn=vel.x*px+vel.z*pz;
+            if(vn<0){ vel.x-=px*vn; vel.z-=pz*vn; }
+          }
+        }
       }
-      const B=this.mapBounds||53;pos.x=Math.max(-B,Math.min(B,pos.x));pos.z=Math.max(-B,Math.min(B,pos.z));
+      const B=this.mapBounds||53;
+      if(pos.x>B){ pos.x=B; if(vel&&vel.x>0) vel.x=0; }
+      else if(pos.x<-B){ pos.x=-B; if(vel&&vel.x<0) vel.x=0; }
+      if(pos.z>B){ pos.z=B; if(vel&&vel.z>0) vel.z=0; }
+      else if(pos.z<-B){ pos.z=-B; if(vel&&vel.z<0) vel.z=0; }
     },
     canSee(from,to){
       const dir=to.clone().sub(from);const dist=dir.length();if(dist<0.1)return true;dir.normalize();
@@ -5410,9 +5518,49 @@ window.__cs3Booted = true;
       return true;
     },
     setBotFacing(bot,tx,tz){
+      // Instant snap kept for rare combat aim; prefer turnBotToward for locomotion
       const dx=tx-bot.mesh.position.x,dz=tz-bot.mesh.position.z;
-      bot.facing=Math.atan2(dx,dz); // face toward target, Y-only
-      bot.mesh.rotation.set(0,bot.facing,0); // NEVER tip
+      if(dx*dx+dz*dz<1e-8) return;
+      bot.facing=Math.atan2(dx,dz);
+      bot.mesh.rotation.set(0,bot.facing,0);
+    },
+    /** Smooth human turn rate (shortest arc). */
+    turnBotToward(bot, tx, tz, dt, rate){
+      const dx=tx-bot.mesh.position.x, dz=tz-bot.mesh.position.z;
+      if(dx*dx+dz*dz<1e-6) return;
+      const target=Math.atan2(dx,dz);
+      let cur=bot.facing!=null?bot.facing:bot.mesh.rotation.y;
+      let d=target-cur;
+      while(d>Math.PI) d-=Math.PI*2;
+      while(d<-Math.PI) d+=Math.PI*2;
+      const max=Math.max(0.5, rate||MOVE.turnRate)*dt;
+      if(Math.abs(d)<=max) cur=target;
+      else cur+=Math.sign(d)*max;
+      bot.facing=cur;
+      bot.mesh.rotation.set(0,cur,0);
+    },
+    /** Body faces walk direction; optional head glance toward aim. */
+    updateBotBodyAim(bot, aimX, aimZ, dt, speedNow){
+      const moving=speedNow>0.55;
+      if(moving){
+        // Real people orient torso with footsteps first
+        this.turnBotToward(bot, bot.mesh.position.x+bot.vel.x, bot.mesh.position.z+bot.vel.z, dt, MOVE.turnRate);
+      } else if(aimX!=null && aimZ!=null){
+        this.turnBotToward(bot, aimX, aimZ, dt, MOVE.aimTurnRate);
+      }
+      const head=bot.mesh.userData&&bot.mesh.userData.head;
+      if(head && aimX!=null && moving){
+        // slight head glance toward threat while body walks
+        const dx=aimX-bot.mesh.position.x, dz=aimZ-bot.mesh.position.z;
+        const aimYaw=Math.atan2(dx,dz);
+        let rel=aimYaw-(bot.facing||0);
+        while(rel>Math.PI) rel-=Math.PI*2;
+        while(rel<-Math.PI) rel+=Math.PI*2;
+        rel=Math.max(-0.55, Math.min(0.55, rel));
+        head.rotation.y += (rel - head.rotation.y)*Math.min(1, dt*8);
+      } else if(head && !moving){
+        head.rotation.y += (0 - head.rotation.y)*Math.min(1, dt*6);
+      }
     },
 
     updateBomb(dt){
@@ -5467,7 +5615,24 @@ window.__cs3Booted = true;
     updateBots(dt){
       const now=performance.now();
       for(const bot of this.bots){
-        if(!bot.alive){if(!MODES[this.mode].bomb&&now>=bot.respawnAt)this.respawnBot(bot);continue;}
+        // Dead: keep updating death anim + tip body so fall is visible
+        if(!bot.alive){
+          if(bot.mesh){
+            bot.fallT=(bot.fallT||0)+dt;
+            const t=Math.min(1, bot.fallT/0.7);
+            const ease=t*t*(3-2*t);
+            const yaw=bot.fallYaw!=null?bot.fallYaw:(bot.facing||0);
+            const ax=bot.fallAxis||1;
+            // Always drive fall pose while dead (until respawn) — unmistakable on the ground
+            bot.mesh.rotation.order='YXZ';
+            bot.mesh.rotation.set(ease*(Math.PI*0.52), yaw, ease*0.55*ax);
+            bot.mesh.position.y = 0.02 + Math.sin(Math.min(1,ease)*Math.PI)*0.12*(1-ease);
+            const anim=bot.mesh.userData&&bot.mesh.userData.anim;
+            if(anim) anim.update(dt);
+          }
+          if(!MODES[this.mode].bomb&&now>=bot.respawnAt)this.respawnBot(bot);
+          continue;
+        }
         bot.shootCd=Math.max(0,bot.shootCd-dt);
         bot.strafeT=(bot.strafeT||0)-dt;
         bot.memoryT=Math.max(0,(bot.memoryT||0)-dt);
@@ -5607,59 +5772,54 @@ window.__cs3Booted = true;
           if(pos.distanceTo(bot.flankWp)<2.2) bot.flankWp=null;
         } else if(targetPos) moveTarget=targetPos;
 
-        // combat movement: accel/friction (CS-like), strafe + keep distance
+        // combat movement: human-weighted accel + arrive slowdown
         if(!bot.vel) bot.vel=new THREE.Vector3();
         const wish=new THREE.Vector3();
+        let distToMove=0;
         if(moveTarget&&this.round.freeze<=0){
           const to=new THREE.Vector3(moveTarget.x-pos.x,0,moveTarget.z-pos.z);
-          let dir=to.length()>0.01?to.normalize():new THREE.Vector3(Math.sin(bot.facing),0,Math.cos(bot.facing));
+          distToMove=to.length();
+          let dir=distToMove>0.01?to.normalize():new THREE.Vector3(Math.sin(bot.facing||0),0,Math.cos(bot.facing||0));
           if(bot.state==='attack' && hasLOS){
             const right=new THREE.Vector3(dir.z,0,-dir.x).multiplyScalar(bot.strafeDir);
+            // Human peek: shorter steps, more lateral, less sprint-strafe
             if(combatDist<9){
-              dir=dir.multiplyScalar(-0.55).add(right.multiplyScalar(0.85)).normalize();
+              dir=dir.multiplyScalar(-0.4).add(right.multiplyScalar(0.9)).normalize();
             } else if(combatDist<22){
-              dir=dir.multiplyScalar(0.25).add(right.multiplyScalar(0.95)).normalize();
+              dir=dir.multiplyScalar(0.15).add(right.multiplyScalar(0.95)).normalize();
             } else {
-              dir=dir.multiplyScalar(0.75).add(right.multiplyScalar(0.55)).normalize();
+              dir=dir.multiplyScalar(0.65).add(right.multiplyScalar(0.5)).normalize();
             }
             if(bot.coverT>0) dir=right.normalize();
           }
           wish.copy(dir);
         }
-        const maxSp=bot.state==='patrol'?(bot.speed||5.6)*0.55
-          :(bot.state==='attack'?(bot.speed||5.6)*(0.72+skill*0.18)
-          :(bot.speed||5.6)*0.9);
-        const accel=bot.state==='attack'?38:28;
-        const friction=9.5;
-        if(wish.lengthSq()>0.0001){
-          // accelerate toward wish
-          const currentSpeed=bot.vel.dot(wish);
-          const addSp=Math.max(0, maxSp-currentSpeed);
-          const accelSp=Math.min(addSp, accel*dt);
-          bot.vel.x+=wish.x*accelSp; bot.vel.z+=wish.z*accelSp;
-        } else {
-          // ground friction
-          const sp=Math.hypot(bot.vel.x, bot.vel.z);
-          if(sp>0.01){
-            const drop=Math.min(sp, friction*dt);
-            bot.vel.x*=(sp-drop)/sp; bot.vel.z*=(sp-drop)/sp;
-          } else { bot.vel.x=0; bot.vel.z=0; }
+        const baseSp=Math.min(MOVE.run, bot.speed||5.6);
+        let wishSpeed=bot.state==='patrol'?baseSp*0.48
+          :(bot.state==='attack'?baseSp*(0.52+skill*0.14)
+          :baseSp*0.78);
+        // Arrive: ease into waypoints / plant spots like a person braking
+        if(distToMove>0 && distToMove<MOVE.arriveDist){
+          wishSpeed*=Math.max(0.2, distToMove/MOVE.arriveDist);
         }
-        // clamp
-        const sp2=Math.hypot(bot.vel.x, bot.vel.z);
-        if(sp2>maxSp*1.15){ bot.vel.x*=maxSp*1.15/sp2; bot.vel.z*=maxSp*1.15/sp2; }
-        if(this.round.freeze>0){ bot.vel.x=0; bot.vel.z=0; }
+        if(this.round.freeze>0){ wish.set(0,0,0); wishSpeed=0; }
+        this.applyGroundFriction(bot.vel, dt);
+        if(wish.lengthSq()>0.0001 && wishSpeed>0){
+          this.accelerateXZ(bot.vel, wish, wishSpeed, MOVE.groundAccel, dt);
+        }
         const next=pos.clone(); next.x+=bot.vel.x*dt; next.z+=bot.vel.z*dt; next.y=0;
-        this.resolveCollision(next,0.4); pos.x=next.x; pos.z=next.z;
+        this.resolveCollision(next, MOVE.radius, bot.vel, MOVE.bodyY);
+        pos.x=next.x; pos.z=next.z;
         const speedNow=Math.hypot(bot.vel.x, bot.vel.z);
         bot.moving=speedNow>0.45;
         if(bot.moving) bot.walkPhase=(bot.walkPhase||0)+dt*speedNow*0.85;
+
+        let aimX=null, aimZ=null;
         if(hasLOS && (shootPlayer||targetBot)){
           const look=shootPlayer?this.player.pos:(targetBot.mesh.position);
-          this.setBotFacing(bot,look.x,look.z);
-        } else if(bot.moving){
-          this.setBotFacing(bot,pos.x+bot.vel.x,pos.z+bot.vel.z);
+          aimX=look.x; aimZ=look.z;
         }
+        this.updateBotBodyAim(bot, aimX, aimZ, dt, speedNow);
 
         // close-range knife swap (CS-style)
         if(bot.state==='attack' && combatDist>0 && combatDist<2.4 && bot.weapon!=='knife'){
@@ -5674,20 +5834,37 @@ window.__cs3Booted = true;
           anim.update(dt);
           if(bot.alive && !anim.locked){
             if(bot.moving){
-              anim.setState(speedNow>4.2?'run':'walk');
-            } else if((bot.state==='attack' || (bot.engageT||0)>0) && wType!=='melee'){
+              // Speed-matched loco; peek never sprints (human caution)
+              const peeking=bot.state==='attack' && hasLOS;
+              const loco=(!peeking && speedNow>4.0)?'run':'walk';
+              anim.setLocomotion(loco, speedNow);
+            } else if(hasLOS && (bot.state==='attack' || (bot.engageT||0)>0.15) && wType!=='melee'){
+              // Aim only while actually engaging — not a restless idle flap
               anim.setState('aim');
             } else {
               anim.setState('idle');
+              const head=bot.mesh.userData.head;
+              if(head){ head.rotation.x*=Math.max(0,1-8*dt); head.rotation.y*=Math.max(0,1-8*dt); head.rotation.z*=Math.max(0,1-8*dt); }
             }
           }
         } else {
           const L=bot.mesh.userData.limbs;
           if(L){
-            const swing=bot.moving?Math.sin(bot.walkPhase)*0.55:Math.sin(performance.now()*0.002+bot.id)*0.04;
-            L.leftLeg.rotation.x=swing; L.rightLeg.rotation.x=-swing;
-            L.leftArm.rotation.x=-swing*0.55; L.rightArm.rotation.x=0.35+swing*0.25;
-            L.torsoG.rotation.y=bot.moving?Math.sin(bot.walkPhase*0.5)*0.04:0;
+            if(bot.moving){
+              const swing=Math.sin(bot.walkPhase)*0.55;
+              L.leftLeg.rotation.x=swing; L.rightLeg.rotation.x=-swing;
+              L.leftArm.rotation.x=-swing*0.55; L.rightArm.rotation.x=0.35+swing*0.25;
+              L.torsoG.rotation.y=Math.sin(bot.walkPhase*0.5)*0.04;
+            } else {
+              // Stop: arms hang calm at sides — no idle waving
+              L.leftLeg.rotation.x*=Math.max(0,1-10*dt);
+              L.rightLeg.rotation.x*=Math.max(0,1-10*dt);
+              L.leftArm.rotation.x += (0.15 - L.leftArm.rotation.x)*Math.min(1,dt*8);
+              L.rightArm.rotation.x += (0.15 - L.rightArm.rotation.x)*Math.min(1,dt*8);
+              L.leftArm.rotation.z += (0.05 - (L.leftArm.rotation.z||0))*Math.min(1,dt*8);
+              L.rightArm.rotation.z += (-0.05 - (L.rightArm.rotation.z||0))*Math.min(1,dt*8);
+              L.torsoG.rotation.y*=Math.max(0,1-8*dt);
+            }
             L.headG.rotation.x=bot.state==='attack'?-0.08:0;
           }
         }
@@ -5702,7 +5879,7 @@ window.__cs3Booted = true;
         const tryShootAt=(aimPos, onHit)=>{
           const dist=pos.distanceTo(new THREE.Vector3(aimPos.x,pos.y,aimPos.z));
           if(dist>maxRange||!this.canSee(eye,aimPos)) return false;
-          this.setBotFacing(bot,aimPos.x,aimPos.z);
+          this.turnBotToward(bot,aimPos.x,aimPos.z,dt,MOVE.aimTurnRate);
           bot.aimHold=(bot.aimHold||0)+dt;
           if(bot.aimHold < (bot.reaction||0.3)*(1.35-skill*0.25)) return true;
           const fireCd=bw.type==='melee'?0.55:((0.55+Math.random()*0.5)*(1.25-skill*0.15));
@@ -5818,61 +5995,67 @@ window.__cs3Booted = true;
       this.weaponKickRot=Math.max(0,this.weaponKickRot-dt*7);
       if(this.muzzleFlash.intensity>0)this.muzzleFlash.intensity=Math.max(0,this.muzzleFlash.intensity-dt*28);
 
-      // crouch eye height
-      const targetH=this.crouching?(this.player.crouchH||1.15):(this.player.standingH||1.7);
-      this.player.pos.y += (targetH - this.player.pos.y)*Math.min(1,dt*12);
+      // Movement: shared friction/accel; eyeH crouch; edge jump; always integrate gravity
+      const standingH=this.player.standingH||1.7;
+      const crouchH=this.player.crouchH||1.15;
+      const eyeTarget=this.crouching?crouchH:standingH;
+      if(this.player.eyeH==null) this.player.eyeH=standingH;
 
       let wish=new THREE.Vector3();
-      if(!frozen && !this.buyOpen){
+      let wishSpeed=0;
+      const canSteer=!frozen && !this.buyOpen;
+      if(canSteer){
         const forward=new THREE.Vector3(-Math.sin(this.yaw),0,-Math.cos(this.yaw));
         const right=new THREE.Vector3(Math.cos(this.yaw),0,-Math.sin(this.yaw));
         if(this.keys['KeyW'])wish.add(forward);if(this.keys['KeyS'])wish.sub(forward);
         if(this.keys['KeyD'])wish.add(right);if(this.keys['KeyA'])wish.sub(right);
         if(wish.lengthSq()>0)wish.normalize();
-        // CS-like speeds: run ~250u → ~6.0, walk ~130 → ~3.4, crouch ~0.34
-        let wishSpeed=(this.keys['ShiftLeft']||this.keys['ShiftRight'])?3.4:6.0;
-        if(this.crouching) wishSpeed*=0.34;
-        const onGround=this.player.onGround;
-        const friction=8.5, stopSpeed=1.5;
-        const accel=onGround?42:12;
-        // ground friction (always when grounded)
-        if(onGround){
-          const sp=Math.hypot(this.player.vel.x, this.player.vel.z);
-          if(sp>0.01){
-            const control=sp<stopSpeed?stopSpeed:sp;
-            const drop=Math.min(sp, control*friction*dt);
-            const ns=(sp-drop)/sp;
-            this.player.vel.x*=ns; this.player.vel.z*=ns;
-          } else { this.player.vel.x=0; this.player.vel.z=0; }
-        }
-        // accelerate toward wish
-        if(wish.lengthSq()>0.0001){
-          const currentSpeed=this.player.vel.x*wish.x+this.player.vel.z*wish.z;
-          const addSp=wishSpeed-currentSpeed;
-          if(addSp>0){
-            const accelSp=Math.min(addSp, accel*wishSpeed*dt);
-            this.player.vel.x+=wish.x*accelSp;
-            this.player.vel.z+=wish.z*accelSp;
+        wishSpeed=(this.keys['ShiftLeft']||this.keys['ShiftRight'])?MOVE.walk:MOVE.run;
+        if(this.crouching) wishSpeed*=MOVE.crouchMul;
+      }
+
+      const onGround=this.player.onGround;
+      const wasGrounded=onGround;
+      if(onGround) this.applyGroundFriction(this.player.vel, dt);
+      if(wish.lengthSq()>0.0001 && wishSpeed>0){
+        this.accelerateXZ(this.player.vel, wish, wishSpeed, onGround?MOVE.groundAccel:MOVE.airAccel, dt);
+      }
+
+      // Edge-triggered jump (no held-Space auto-bhop)
+      const spaceDown=!!(this.keys['Space']);
+      const jumpEdge=spaceDown && !this.jumpHeld;
+      this.jumpHeld=spaceDown;
+      if(jumpEdge && this.player.onGround && !this.crouching && canSteer){
+        this.player.vel.y=MOVE.jumpVel;
+        this.player.onGround=false;
+      }
+
+      this.player.vel.y-=MOVE.gravity*dt;
+      const next=this.player.pos.clone();
+      next.x+=this.player.vel.x*dt; next.z+=this.player.vel.z*dt;
+      this.resolveCollision(next, this.player.radius||MOVE.radius, this.player.vel, MOVE.bodyY);
+      next.y+=this.player.vel.y*dt;
+
+      if(this.player.onGround){
+        // Smooth crouch/stand — eyeH owns grounded height (no fighting floor snap)
+        this.player.eyeH += (eyeTarget - this.player.eyeH)*Math.min(1, dt*12);
+        next.y=this.player.eyeH;
+        this.player.vel.y=0;
+      } else {
+        // Land when reaching stance eye height
+        if(next.y<=eyeTarget){
+          next.y=eyeTarget;
+          this.player.eyeH=eyeTarget;
+          this.player.vel.y=0;
+          this.player.onGround=true;
+          // Human landing: absorb some horizontal momentum
+          if(!wasGrounded){
+            this.player.vel.x*=MOVE.landDamp;
+            this.player.vel.z*=MOVE.landDamp;
           }
         }
-        // soft clamp (surf leftover)
-        const sp2=Math.hypot(this.player.vel.x, this.player.vel.z);
-        const cap=wishSpeed*1.25+(onGround?0:1.5);
-        if(sp2>cap){ this.player.vel.x*=cap/sp2; this.player.vel.z*=cap/sp2; }
-        // jump ~CS ratio to walk speed; gravity slightly snappier
-        if(this.keys['Space']&&this.player.onGround&&!this.crouching){
-          this.player.vel.y=7.8; this.player.onGround=false;
-        }
-        this.player.vel.y-=20*dt;
-        const next=this.player.pos.clone();next.x+=this.player.vel.x*dt;next.z+=this.player.vel.z*dt;
-        this.resolveCollision(next,this.player.radius);next.y+=this.player.vel.y*dt;
-        const floorY=this.crouching?(this.player.crouchH||1.15):(this.player.standingH||1.7);
-        if(next.y<=floorY){next.y=floorY;this.player.vel.y=0;this.player.onGround=true;}
-        this.player.pos.copy(next);
-      } else if(this.player.onGround){
-        // stop when frozen / buy menu
-        this.player.vel.x*=Math.max(0,1-10*dt); this.player.vel.z*=Math.max(0,1-10*dt);
       }
+      this.player.pos.copy(next);
 
       this.camera.position.copy(this.player.pos);
       if(this.shake>0){
@@ -6231,6 +6414,7 @@ window.__cs3Booted = true;
   }
   bootLobby();
   window.__boot = 'done';
+  window.__CS3 = { Game, get MOVE(){ return MOVE; } };
 })();
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', bootCS3);
