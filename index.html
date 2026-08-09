@@ -2483,9 +2483,19 @@ window.__cs3Booted = true;
   // ===== GLB HUMANOID CHARACTERS (Mixamo Soldier) =====
   function findBoneByNames(root, names){
     let found=null;
+    const want=names.map(n=>String(n).toLowerCase());
     root.traverse(o=>{
       if(found||!o.name) return;
-      if(names.indexOf(o.name)>=0) found=o;
+      const n=o.name;
+      const nl=n.toLowerCase();
+      // Exact, mixamorig:X, or Mixamo GLB style mixamorigX (no colon)
+      for(let i=0;i<want.length;i++){
+        const w=want[i];
+        if(nl===w){ found=o; return; }
+        const bare=w.replace(/^mixamorig:/,'');
+        if(nl==='mixamorig'+bare || nl==='mixamorig:'+bare){ found=o; return; }
+        if(nl.endsWith(bare) && (nl.includes('mixamorig')||bare.length>4)){ found=o; return; }
+      }
     });
     return found;
   }
@@ -2512,23 +2522,17 @@ window.__cs3Booted = true;
     const rName=rArm?rArm.name:null;
     const lName=lArm?lArm.name:null;
     if(spineName&&rName&&lName){
-      // Calm aim hold — static-ish, no arm-flapping loop
+      // Aim = slight spine lean only — arms come from applyRifleCarryPose
       clips.push(new THREE.AnimationClip('AimIdle', 2.0, [
-        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,2], quatVals([[0.06,0.02,0],[0.07,0.02,0]])),
-        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,2], quatVals([[0.55,-0.08,0.12],[0.56,-0.07,0.12]])),
-        new THREE.QuaternionKeyframeTrack(lName+'.quaternion', [0,2], quatVals([[0.45,0.12,-0.08],[0.46,0.11,-0.08]]))
+        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,2], quatVals([[0.05,0.02,0],[0.055,0.02,0]]))
       ]));
       const shootTracks=[
-        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,0.07,0.28], quatVals([[0.06,0.02,0],[-0.08,0.04,0.05],[0.06,0.02,0]])),
-        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,0.07,0.28], quatVals([[0.55,-0.08,0.12],[0.4,-0.02,0.25],[0.55,-0.08,0.12]]))
+        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,0.07,0.28], quatVals([[0.05,0.02,0],[-0.06,0.03,0.04],[0.05,0.02,0]]))
       ];
-      if(rFore) shootTracks.push(new THREE.QuaternionKeyframeTrack(rFore.name+'.quaternion', [0,0.07,0.28], quatVals([[0.15,0,0],[0.35,0,0],[0.15,0,0]])));
       clips.push(new THREE.AnimationClip('Shoot', 0.28, shootTracks));
       const reloadTracks=[
-        new THREE.QuaternionKeyframeTrack(rName+'.quaternion', [0,0.35,0.9,1.6], quatVals([[0.55,-0.08,0.12],[0.35,0.35,0.4],[0.3,-0.2,0.55],[0.55,-0.08,0.12]])),
-        new THREE.QuaternionKeyframeTrack(lName+'.quaternion', [0,0.4,1.0,1.6], quatVals([[0.45,0.12,-0.08],[0.5,-0.35,0.2],[0.4,-0.15,0.35],[0.45,0.12,-0.08]]))
+        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,0.4,1.2,1.6], quatVals([[0.05,0,0],[0.12,0.05,0],[0.08,-0.04,0],[0.05,0,0]]))
       ];
-      if(lFore) reloadTracks.push(new THREE.QuaternionKeyframeTrack(lFore.name+'.quaternion', [0,0.45,1.1,1.6], quatVals([[0.1,0,0],[0.7,0.15,0],[0.45,0,0],[0.1,0,0]])));
       clips.push(new THREE.AnimationClip('Reload', 1.6, reloadTracks));
     } else {
       // Fallback: subtle root pitch so states still exist
@@ -2543,29 +2547,57 @@ window.__cs3Booted = true;
       ]));
     }
     if(hips){
-      const pos0=hips.position.clone();
-      // Clear fall: tip over + hips drop so death reads from any angle
-      clips.push(new THREE.AnimationClip('Death', 1.5, [
-        new THREE.QuaternionKeyframeTrack(hips.name+'.quaternion', [0,0.25,0.7,1.5], quatVals([
+      // Soft death tip only — no hips.position drop (that buries corpses under the floor)
+      clips.push(new THREE.AnimationClip('Death', 1.2, [
+        new THREE.QuaternionKeyframeTrack(hips.name+'.quaternion', [0,0.4,1.2], quatVals([
           [0,0,0],
-          [0.55,0.15,0.35],
-          [1.15,0.25,0.85],
-          [1.35,0.1,1.15]
-        ])),
-        new THREE.VectorKeyframeTrack(hips.name+'.position', [0,0.35,0.9,1.5], [
-          pos0.x, pos0.y, pos0.z,
-          pos0.x+0.05, pos0.y*0.7, pos0.z+0.12,
-          pos0.x+0.12, pos0.y*0.25, pos0.z+0.35,
-          pos0.x+0.18, 0.02, pos0.z+0.55
-        ])
+          [0.35,0.1,0.2],
+          [0.55,0.05,0.35]
+        ]))
       ]));
     } else {
-      clips.push(new THREE.AnimationClip('Death', 1.2, [
-        new THREE.VectorKeyframeTrack('.position', [0,0.4,1.2], [0,0,0, 0,-0.5,0.25, 0,-0.95,0.45]),
-        new THREE.QuaternionKeyframeTrack('.quaternion', [0,0.4,1.2], quatVals([[0,0,0],[1.0,0,0.4],[1.4,0,0.2]]))
+      clips.push(new THREE.AnimationClip('Death', 1.0, [
+        new THREE.QuaternionKeyframeTrack('.quaternion', [0,0.5,1.0], quatVals([[0,0,0],[0.8,0,0.2],[1.1,0,0.15]]))
       ]));
     }
     return clips;
+  }
+
+  const _carryQ = {
+    rArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(1.15, 0.12, -0.35, 'XYZ')),
+    lArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(1.05, -0.28, 0.42, 'XYZ')),
+    rFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.35, 0.05, 0.1, 'XYZ')),
+    lFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.55, -0.08, -0.05, 'XYZ')),
+    limpR: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, 0.05, -0.15, 'XYZ')),
+    limpL: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, -0.05, 0.15, 'XYZ'))
+  };
+  const _tmpQ = new THREE.Quaternion();
+  /** Override Mixamo Walk arm-swing with a stable rifle carry (gun on RightHand). */
+  function applyRifleCarryPose(model, dt, mode){
+    if(!model) return;
+    const k = Math.min(1, 1 - Math.exp(-(mode==='limp'?10:14)*(dt||1/60)));
+    const rArm=findBoneByNames(model,['mixamorig:RightArm','RightArm']);
+    const lArm=findBoneByNames(model,['mixamorig:LeftArm','LeftArm']);
+    const rFore=findBoneByNames(model,['mixamorig:RightForeArm','RightForeArm']);
+    const lFore=findBoneByNames(model,['mixamorig:LeftForeArm','LeftForeArm']);
+    const tr = mode==='limp'?_carryQ.limpR:_carryQ.rArm;
+    const tl = mode==='limp'?_carryQ.limpL:_carryQ.lArm;
+    if(rArm){ _tmpQ.copy(rArm.quaternion).slerp(tr, k); rArm.quaternion.copy(_tmpQ); }
+    if(lArm){ _tmpQ.copy(lArm.quaternion).slerp(tl, k); lArm.quaternion.copy(_tmpQ); }
+    if(mode!=='limp'){
+      if(rFore){ _tmpQ.copy(rFore.quaternion).slerp(_carryQ.rFore, k); rFore.quaternion.copy(_tmpQ); }
+      if(lFore){ _tmpQ.copy(lFore.quaternion).slerp(_carryQ.lFore, k); lFore.quaternion.copy(_tmpQ); }
+    }
+  }
+  /** Keep tipped corpse resting on the floor (no underground clip). */
+  function snapCorpseToGround(mesh){
+    if(!mesh) return;
+    mesh.updateMatrixWorld(true);
+    const box=new THREE.Box3().setFromObject(mesh);
+    if(!isFinite(box.min.y)) return;
+    if(box.min.y < -0.001 || box.min.y > 0.02){
+      mesh.position.y -= box.min.y;
+    }
   }
   function makeSimpleRifleMesh(){
     return buildWorldWeaponMesh('ak');
@@ -5268,10 +5300,17 @@ window.__cs3Booted = true;
       if(bot.hasBomb&&!this.bomb.planted){bot.hasBomb=false;const other=this.bots.find(b=>b.team==='T'&&b.alive);if(other){other.hasBomb=true;this.bomb.carrier=other;other.plantTarget=bot.plantTarget;}}
       if(MODES[this.mode].bomb&&!this.round.over)this.checkRoundEnd();
       const anim=bot.mesh&&bot.mesh.userData&&bot.mesh.userData.anim;
-      bot.respawnAt=performance.now()+4500;
+      // Linger on the ground long enough to read the corpse (DM)
+      bot.respawnAt=performance.now()+9000;
+      bot.fallSettled=false;
+      bot.fallPitch=Math.PI*0.5;
+      bot.fallRoll=0.45*((Math.random()<0.5?1:-1));
       if(bot.mesh){
         bot.fallAxis=(Math.random()<0.5?1:-1);
+        bot.fallRoll=0.45*bot.fallAxis;
         bot.fallYaw=bot.facing!=null?bot.facing:bot.mesh.rotation.y;
+        bot.mesh.visible=true;
+        bot.mesh.rotation.order='YXZ';
         // Death flash so kill is obvious
         bot.mesh.traverse(o=>{
           if(o.isMesh&&o.material&&o.material.emissive){
@@ -5279,25 +5318,32 @@ window.__cs3Booted = true;
             setTimeout(()=>{ if(o.material) o.material.emissive.setHex(0); }, 220);
           }
         });
-        // Drop gun visually with the body
         const gun=bot.mesh.userData.gun;
         if(gun) gun.visible=true;
       }
       if(anim){
-        // Stop loco/aim so death isn't fighting walk arms
-        ['idle','walk','run','aim','shoot','reload'].forEach(k=>{
+        // Stop loco/aim — procedural tip is the fall; skip Death hips clip
+        ['idle','walk','run','aim','shoot','reload','death'].forEach(k=>{
           const a=anim.actions[k]; if(a) a.stop();
         });
-        anim.playOneShot('death');
+        anim.locked=false;
+        if(anim.mixer) anim.mixer.stopAllAction();
       }
     },
     respawnBot(bot){
       if(MODES[this.mode].bomb)return; // no mid-round respawn in bomb
       const wp=this.waypoints[Math.floor(Math.random()*this.waypoints.length)].clone();
       bot.mesh.position.set(wp.x,0,wp.z);bot.mesh.visible=true;bot.hp=100;bot.alive=true;bot.state='patrol';
-      bot.falling=false; bot.fallT=0;
+      bot.falling=false; bot.fallT=0; bot.fallSettled=false;
+      bot.mesh.rotation.order='YXZ';
       bot.mesh.rotation.set(0, bot.team==='CT'?0:Math.PI, 0);
       bot.facing=bot.mesh.rotation.y;
+      bot.mesh.traverse(o=>{
+        if(o.isMesh&&o.material){
+          const mats=Array.isArray(o.material)?o.material:[o.material];
+          mats.forEach(m=>{ if(m.opacity!=null && m.opacity<1){ m.opacity=1; m.transparent=false; } });
+        }
+      });
       if(bot.mesh.userData&&bot.mesh.userData.head) bot.mesh.userData.head.rotation.set(0,0,0);
       if(bot.mesh.userData&&bot.mesh.userData.anim) bot.mesh.userData.anim.resetToIdle();
     },
@@ -5548,18 +5594,11 @@ window.__cs3Booted = true;
       } else if(aimX!=null && aimZ!=null){
         this.turnBotToward(bot, aimX, aimZ, dt, MOVE.aimTurnRate);
       }
+      // Don't fight mixer with manual head.rotation during loco
       const head=bot.mesh.userData&&bot.mesh.userData.head;
-      if(head && aimX!=null && moving){
-        // slight head glance toward threat while body walks
-        const dx=aimX-bot.mesh.position.x, dz=aimZ-bot.mesh.position.z;
-        const aimYaw=Math.atan2(dx,dz);
-        let rel=aimYaw-(bot.facing||0);
-        while(rel>Math.PI) rel-=Math.PI*2;
-        while(rel<-Math.PI) rel+=Math.PI*2;
-        rel=Math.max(-0.55, Math.min(0.55, rel));
-        head.rotation.y += (rel - head.rotation.y)*Math.min(1, dt*8);
-      } else if(head && !moving){
+      if(head && !moving){
         head.rotation.y += (0 - head.rotation.y)*Math.min(1, dt*6);
+        head.rotation.x += (0 - head.rotation.x)*Math.min(1, dt*6);
       }
     },
 
@@ -5615,20 +5654,39 @@ window.__cs3Booted = true;
     updateBots(dt){
       const now=performance.now();
       for(const bot of this.bots){
-        // Dead: keep updating death anim + tip body so fall is visible
+        // Dead: procedural tip → lie on floor (snapCorpseToGround) → linger
         if(!bot.alive){
           if(bot.mesh){
+            bot.mesh.visible=true;
             bot.fallT=(bot.fallT||0)+dt;
-            const t=Math.min(1, bot.fallT/0.7);
+            const fallDur=0.75;
+            const t=Math.min(1, bot.fallT/fallDur);
             const ease=t*t*(3-2*t);
             const yaw=bot.fallYaw!=null?bot.fallYaw:(bot.facing||0);
-            const ax=bot.fallAxis||1;
-            // Always drive fall pose while dead (until respawn) — unmistakable on the ground
+            const pitch=bot.fallPitch!=null?bot.fallPitch:(Math.PI*0.5);
+            const roll=bot.fallRoll!=null?bot.fallRoll:0.45*(bot.fallAxis||1);
             bot.mesh.rotation.order='YXZ';
-            bot.mesh.rotation.set(ease*(Math.PI*0.52), yaw, ease*0.55*ax);
-            bot.mesh.position.y = 0.02 + Math.sin(Math.min(1,ease)*Math.PI)*0.12*(1-ease);
-            const anim=bot.mesh.userData&&bot.mesh.userData.anim;
-            if(anim) anim.update(dt);
+            bot.mesh.rotation.set(ease*pitch, yaw, ease*roll);
+            applyRifleCarryPose(bot.mesh, dt, t>0.45?'limp':'carry');
+            snapCorpseToGround(bot.mesh);
+            if(t>=1 && !bot.fallSettled){
+              bot.fallSettled=true;
+              bot.mesh.rotation.set(pitch, yaw, roll);
+              snapCorpseToGround(bot.mesh);
+            }
+            // Soft fade in last 0.5s before DM respawn (not mid-fall vanish)
+            if(!MODES[this.mode].bomb && bot.respawnAt){
+              const left=bot.respawnAt-now;
+              if(left<500 && left>0){
+                const a=Math.max(0.05, left/500);
+                bot.mesh.traverse(o=>{
+                  if(o.isMesh&&o.material){
+                    const mats=Array.isArray(o.material)?o.material:[o.material];
+                    mats.forEach(m=>{ m.transparent=true; m.opacity=a; });
+                  }
+                });
+              }
+            }
           }
           if(!MODES[this.mode].bomb&&now>=bot.respawnAt)this.respawnBot(bot);
           continue;
@@ -5846,6 +5904,10 @@ window.__cs3Booted = true;
               const head=bot.mesh.userData.head;
               if(head){ head.rotation.x*=Math.max(0,1-8*dt); head.rotation.y*=Math.max(0,1-8*dt); head.rotation.z*=Math.max(0,1-8*dt); }
             }
+          }
+          // Rifle carry overrides Walk/Run arm swing (gun on RightHand)
+          if(bot.alive && wType!=='melee' && bot.weapon!=='knife'){
+            applyRifleCarryPose(bot.mesh, dt, 'carry');
           }
         } else {
           const L=bot.mesh.userData.limbs;
