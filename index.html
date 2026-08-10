@@ -1263,8 +1263,11 @@ window.__cs3Booted = true;
     bodyY:0.9, radius:0.4,
     turnRate:8.5,       // rad/s body turn when locomoting
     aimTurnRate:12,     // faster when standing aim
-    landDamp:0.82,      // horizontal absorb on landing
-    arriveDist:2.4      // slow near waypoints
+    landDamp:0.82,      // only on hard landings (|vy| before land)
+    landDampVy:4.5,     // impact speed threshold for landDamp
+    arriveDist:2.4,     // slow near waypoints
+    capsuleHalf:0.75,   // body probe half-height from feet center offset
+    stepClear:0.06      // feet above maxY → treat as cleared over prop
   };
   const STORAGE_KEY = 'cs3_browser_save_v1';
   function defaultSave(){
@@ -2571,22 +2574,40 @@ window.__cs3Booted = true;
     limpR: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, 0.05, -0.15, 'XYZ')),
     limpL: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, -0.05, 0.15, 'XYZ'))
   };
-  const _tmpQ = new THREE.Quaternion();
-  /** Override Mixamo Walk arm-swing with a stable rifle carry (gun on RightHand). */
+  /** Cache Mixamo arm bones once — avoid traverse every frame. */
+  function getCarryBones(model){
+    if(!model) return null;
+    const ud=model.userData||(model.userData={});
+    if(ud._carryBones) return ud._carryBones;
+    ud._carryBones={
+      rArm:findBoneByNames(model,['mixamorig:RightArm','RightArm']),
+      lArm:findBoneByNames(model,['mixamorig:LeftArm','LeftArm']),
+      rFore:findBoneByNames(model,['mixamorig:RightForeArm','RightForeArm']),
+      lFore:findBoneByNames(model,['mixamorig:LeftForeArm','LeftForeArm'])
+    };
+    return ud._carryBones;
+  }
+  /**
+   * Hard override Mixamo Walk/Idle/Aim bind arms with rifle carry.
+   * Soft slerp cannot fight mixer (AimIdle has no arm tracks → T-pose every frame).
+   */
   function applyRifleCarryPose(model, dt, mode){
     if(!model) return;
-    const k = Math.min(1, 1 - Math.exp(-(mode==='limp'?10:14)*(dt||1/60)));
-    const rArm=findBoneByNames(model,['mixamorig:RightArm','RightArm']);
-    const lArm=findBoneByNames(model,['mixamorig:LeftArm','LeftArm']);
-    const rFore=findBoneByNames(model,['mixamorig:RightForeArm','RightForeArm']);
-    const lFore=findBoneByNames(model,['mixamorig:LeftForeArm','LeftForeArm']);
-    const tr = mode==='limp'?_carryQ.limpR:_carryQ.rArm;
-    const tl = mode==='limp'?_carryQ.limpL:_carryQ.lArm;
-    if(rArm){ _tmpQ.copy(rArm.quaternion).slerp(tr, k); rArm.quaternion.copy(_tmpQ); }
-    if(lArm){ _tmpQ.copy(lArm.quaternion).slerp(tl, k); lArm.quaternion.copy(_tmpQ); }
-    if(mode!=='limp'){
-      if(rFore){ _tmpQ.copy(rFore.quaternion).slerp(_carryQ.rFore, k); rFore.quaternion.copy(_tmpQ); }
-      if(lFore){ _tmpQ.copy(lFore.quaternion).slerp(_carryQ.lFore, k); lFore.quaternion.copy(_tmpQ); }
+    const bones=getCarryBones(model);
+    if(!bones) return;
+    const limp=mode==='limp';
+    const tr=limp?_carryQ.limpR:_carryQ.rArm;
+    const tl=limp?_carryQ.limpL:_carryQ.lArm;
+    // Hard set for live carry (k=1). Soft blend only for corpse limp settle.
+    if(limp){
+      const k=Math.min(1, 1-Math.exp(-14*(dt||1/60)));
+      if(bones.rArm) bones.rArm.quaternion.slerp(tr, k);
+      if(bones.lArm) bones.lArm.quaternion.slerp(tl, k);
+    } else {
+      if(bones.rArm) bones.rArm.quaternion.copy(tr);
+      if(bones.lArm) bones.lArm.quaternion.copy(tl);
+      if(bones.rFore) bones.rFore.quaternion.copy(_carryQ.rFore);
+      if(bones.lFore) bones.lFore.quaternion.copy(_carryQ.lFore);
     }
   }
   /** Keep tipped corpse resting on the floor (no underground clip). */
@@ -5528,17 +5549,38 @@ window.__cs3Booted = true;
       vel.x+=wishDir.x*accelSp;
       vel.z+=wishDir.z*accelSp;
     },
-    /** bodyY = capsule center for AABB filter; vel optional — kill into-wall component */
+    /**
+     * bodyY = capsule center height for AABB filter.
+     * Prefer passing feet-derived center: feetY + MOVE.bodyY.
+     * Skip colliders when feet clear the top (jump-over) or head is below.
+     */
     resolveCollision(pos,radius,vel,bodyY){
       const by=(bodyY==null?pos.y:bodyY);
-      for(const c of this.colliders){
-        if(by<c.minY-0.2||by-1.5>c.maxY)continue;
-        const nx=Math.max(c.minX,Math.min(pos.x,c.maxX)),nz=Math.max(c.minZ,Math.min(pos.z,c.maxZ));
-        const dx=pos.x-nx,dz=pos.z-nz,d2=dx*dx+dz*dz;
-        if(d2<radius*radius){
-          const d=Math.sqrt(d2)||0.0001;
-          const px=dx/d, pz=dz/d;
-          const push=radius-d;
+      const feetY=by-MOVE.bodyY;
+      const headY=feetY+MOVE.bodyY+MOVE.capsuleHalf;
+      const passes=3;
+      for(let iter=0;iter<passes;iter++){
+        for(const c of this.colliders){
+          // Height filter: jump clear / duck under
+          if(feetY>c.maxY+MOVE.stepClear) continue;
+          if(headY<c.minY-0.05) continue;
+          const nx=Math.max(c.minX,Math.min(pos.x,c.maxX)),nz=Math.max(c.minZ,Math.min(pos.z,c.maxZ));
+          const dx=pos.x-nx,dz=pos.z-nz,d2=dx*dx+dz*dz;
+          if(d2>=radius*radius) continue;
+          let px,pz,push;
+          if(d2<1e-8){
+            // Center inside AABB — push along strongest escape axis
+            const left=pos.x-c.minX, right=c.maxX-pos.x, near=pos.z-c.minZ, far=c.maxZ-pos.z;
+            const m=Math.min(left,right,near,far);
+            if(m===left){ px=-1; pz=0; push=left+radius; }
+            else if(m===right){ px=1; pz=0; push=right+radius; }
+            else if(m===near){ px=0; pz=-1; push=near+radius; }
+            else { px=0; pz=1; push=far+radius; }
+          } else {
+            const d=Math.sqrt(d2);
+            px=dx/d; pz=dz/d;
+            push=radius-d;
+          }
           pos.x+=px*push; pos.z+=pz*push;
           if(vel){
             const vn=vel.x*px+vel.z*pz;
@@ -5551,6 +5593,10 @@ window.__cs3Booted = true;
       else if(pos.x<-B){ pos.x=-B; if(vel&&vel.x<0) vel.x=0; }
       if(pos.z>B){ pos.z=B; if(vel&&vel.z>0) vel.z=0; }
       else if(pos.z<-B){ pos.z=-B; if(vel&&vel.z<0) vel.z=0; }
+    },
+    /** Capsule center from eye/feet for jump-over prop clearance. */
+    capsuleBodyY(feetY){
+      return (feetY==null?0:feetY)+MOVE.bodyY;
     },
     canSee(from,to){
       const dir=to.clone().sub(from);const dist=dir.length();if(dist<0.1)return true;dir.normalize();
@@ -5866,7 +5912,7 @@ window.__cs3Booted = true;
           this.accelerateXZ(bot.vel, wish, wishSpeed, MOVE.groundAccel, dt);
         }
         const next=pos.clone(); next.x+=bot.vel.x*dt; next.z+=bot.vel.z*dt; next.y=0;
-        this.resolveCollision(next, MOVE.radius, bot.vel, MOVE.bodyY);
+        this.resolveCollision(next, MOVE.radius, bot.vel, this.capsuleBodyY(0));
         pos.x=next.x; pos.z=next.z;
         const speedNow=Math.hypot(bot.vel.x, bot.vel.z);
         bot.moving=speedNow>0.45;
@@ -5896,16 +5942,19 @@ window.__cs3Booted = true;
               const peeking=bot.state==='attack' && hasLOS;
               const loco=(!peeking && speedNow>4.0)?'run':'walk';
               anim.setLocomotion(loco, speedNow);
-            } else if(hasLOS && (bot.state==='attack' || (bot.engageT||0)>0.15) && wType!=='melee'){
-              // Aim only while actually engaging — not a restless idle flap
-              anim.setState('aim');
             } else {
-              anim.setState('idle');
+              // Prefer Idle (not spine-only AimIdle) — AimIdle bind = T-pose arms
+              // Rifle hold comes from hard applyRifleCarryPose below
+              if(hasLOS && (bot.state==='attack' || (bot.engageT||0)>0.15) && wType!=='melee'){
+                anim.setState('aim'); // spine lean only; arms hard-overridden
+              } else {
+                anim.setState('idle');
+              }
               const head=bot.mesh.userData.head;
               if(head){ head.rotation.x*=Math.max(0,1-8*dt); head.rotation.y*=Math.max(0,1-8*dt); head.rotation.z*=Math.max(0,1-8*dt); }
             }
           }
-          // Rifle carry overrides Walk/Run arm swing (gun on RightHand)
+          // Hard rifle carry after mixer — must beat AimIdle/Idle arm tracks
           if(bot.alive && wType!=='melee' && bot.weapon!=='knife'){
             applyRifleCarryPose(bot.mesh, dt, 'carry');
           }
@@ -6083,11 +6132,11 @@ window.__cs3Booted = true;
         this.accelerateXZ(this.player.vel, wish, wishSpeed, onGround?MOVE.groundAccel:MOVE.airAccel, dt);
       }
 
-      // Edge-triggered jump (no held-Space auto-bhop)
+      // Edge-triggered jump (allows crouch-jump like CS)
       const spaceDown=!!(this.keys['Space']);
       const jumpEdge=spaceDown && !this.jumpHeld;
       this.jumpHeld=spaceDown;
-      if(jumpEdge && this.player.onGround && !this.crouching && canSteer){
+      if(jumpEdge && this.player.onGround && canSteer){
         this.player.vel.y=MOVE.jumpVel;
         this.player.onGround=false;
       }
@@ -6095,7 +6144,10 @@ window.__cs3Booted = true;
       this.player.vel.y-=MOVE.gravity*dt;
       const next=this.player.pos.clone();
       next.x+=this.player.vel.x*dt; next.z+=this.player.vel.z*dt;
-      this.resolveCollision(next, this.player.radius||MOVE.radius, this.player.vel, MOVE.bodyY);
+      // Feet from eye height so airborne probes clear low props
+      const eyeNow=this.player.eyeH!=null?this.player.eyeH:standingH;
+      const feetY=Math.max(0, this.player.pos.y-eyeNow);
+      this.resolveCollision(next, this.player.radius||MOVE.radius, this.player.vel, this.capsuleBodyY(feetY));
       next.y+=this.player.vel.y*dt;
 
       if(this.player.onGround){
@@ -6106,12 +6158,13 @@ window.__cs3Booted = true;
       } else {
         // Land when reaching stance eye height
         if(next.y<=eyeTarget){
+          const impactVy=Math.abs(this.player.vel.y);
           next.y=eyeTarget;
           this.player.eyeH=eyeTarget;
           this.player.vel.y=0;
           this.player.onGround=true;
-          // Human landing: absorb some horizontal momentum
-          if(!wasGrounded){
+          // Absorb horizontal only on hard landings (keeps light bhop carry)
+          if(!wasGrounded && impactVy>=MOVE.landDampVy){
             this.player.vel.x*=MOVE.landDamp;
             this.player.vel.z*=MOVE.landDamp;
           }
