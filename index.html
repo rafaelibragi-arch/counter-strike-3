@@ -2518,96 +2518,240 @@ window.__cs3Booted = true;
     const lArm=findBoneByNames(root,['mixamorig:LeftArm','LeftArm','mixamorig:LeftShoulder']);
     const rFore=findBoneByNames(root,['mixamorig:RightForeArm','RightForeArm']);
     const lFore=findBoneByNames(root,['mixamorig:LeftForeArm','LeftForeArm']);
+    const rUp=findBoneByNames(root,['mixamorig:RightUpLeg','RightUpLeg']);
+    const lUp=findBoneByNames(root,['mixamorig:LeftUpLeg','LeftUpLeg']);
+    const rLeg=findBoneByNames(root,['mixamorig:RightLeg','RightLeg']);
+    const lLeg=findBoneByNames(root,['mixamorig:LeftLeg','LeftLeg']);
     const clips=[];
     const idQ=[0,0,0,1];
-    // Always create combat clips; use identity tracks on root if bones missing
     const spineName=spine?spine.name:(hips?hips.name:null);
     const rName=rArm?rArm.name:null;
     const lName=lArm?lArm.name:null;
+    const hipsName=hips?hips.name:null;
+    const pushQ=(name, times, eulers)=>{
+      if(!name) return null;
+      return new THREE.QuaternionKeyframeTrack(name+'.quaternion', times, quatVals(eulers));
+    };
+    const addClip=(name, dur, tracks)=>{
+      const t=tracks.filter(Boolean);
+      if(!t.length) return;
+      clips.push(new THREE.AnimationClip(name, dur, t));
+    };
+
     if(spineName&&rName&&lName){
-      // Aim = slight spine lean only — arms come from applyRifleCarryPose
-      clips.push(new THREE.AnimationClip('AimIdle', 2.0, [
-        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,2], quatVals([[0.05,0.02,0],[0.055,0.02,0]]))
-      ]));
-      const shootTracks=[
-        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,0.07,0.28], quatVals([[0.05,0.02,0],[-0.06,0.03,0.04],[0.05,0.02,0]]))
-      ];
-      clips.push(new THREE.AnimationClip('Shoot', 0.28, shootTracks));
-      const reloadTracks=[
-        new THREE.QuaternionKeyframeTrack(spineName+'.quaternion', [0,0.4,1.2,1.6], quatVals([[0.05,0,0],[0.12,0.05,0],[0.08,-0.04,0],[0.05,0,0]]))
-      ];
-      clips.push(new THREE.AnimationClip('Reload', 1.6, reloadTracks));
+      addClip('AimIdle', 2.0, [
+        pushQ(spineName,[0,2],[[0.05,0.02,0],[0.055,0.02,0]])
+      ]);
+      addClip('Shoot', 0.28, [
+        pushQ(spineName,[0,0.07,0.28],[[0.05,0.02,0],[-0.08,0.04,0.05],[0.05,0.02,0]]),
+        pushQ(rName,[0,0.07,0.28],[[1.1,0.1,-0.3],[0.95,0.18,-0.25],[1.1,0.1,-0.3]])
+      ]);
+      addClip('Reload', 2.2, [
+        pushQ(spineName,[0,0.35,1.1,1.8,2.2],[[0.05,0,0],[0.14,0.06,0],[0.1,-0.05,0],[0.08,0.02,0],[0.05,0,0]]),
+        pushQ(lName,[0,0.35,1.1,1.8,2.2],[[1.05,-0.28,0.42],[0.55,-0.5,0.2],[0.7,-0.35,0.55],[1.0,-0.2,0.35],[1.05,-0.28,0.42]]),
+        pushQ(rName,[0,0.35,1.1,1.8,2.2],[[1.15,0.12,-0.35],[1.0,0.25,-0.2],[0.85,0.15,-0.15],[1.05,0.1,-0.3],[1.15,0.12,-0.35]])
+      ]);
     } else {
-      // Fallback: subtle root pitch so states still exist
-      clips.push(new THREE.AnimationClip('AimIdle', 1.0, [
-        new THREE.QuaternionKeyframeTrack('.quaternion', [0,1], idQ.concat(idQ))
-      ]));
-      clips.push(new THREE.AnimationClip('Shoot', 0.25, [
-        new THREE.VectorKeyframeTrack('.position', [0,0.08,0.25], [0,0,0, 0,0.02,0.03, 0,0,0])
-      ]));
-      clips.push(new THREE.AnimationClip('Reload', 1.2, [
-        new THREE.VectorKeyframeTrack('.position', [0,0.4,1.2], [0,0,0, 0,0.04,0, 0,0,0])
-      ]));
+      addClip('AimIdle', 1.0, [new THREE.QuaternionKeyframeTrack('.quaternion',[0,1],idQ.concat(idQ))]);
+      addClip('Shoot', 0.25, [new THREE.VectorKeyframeTrack('.position',[0,0.08,0.25],[0,0,0, 0,0.02,0.03, 0,0,0])]);
+      addClip('Reload', 1.2, [new THREE.VectorKeyframeTrack('.position',[0,0.4,1.2],[0,0,0, 0,0.04,0, 0,0,0])]);
     }
+
+    // Crouch: hips down + knees bent (synthetic; legs not in Walk mixer override)
+    addClip('CrouchIdle', 1.5, [
+      pushQ(hipsName,[0,1.5],[[0.35,0,0],[0.36,0,0]]),
+      pushQ(spineName,[0,1.5],[[0.12,0,0],[0.13,0,0]]),
+      pushQ(rUp?rUp.name:null,[0,1.5],[[0.85,0.05,0],[0.86,0.05,0]]),
+      pushQ(lUp?lUp.name:null,[0,1.5],[[0.85,-0.05,0],[0.86,-0.05,0]]),
+      pushQ(rLeg?rLeg.name:null,[0,1.5],[[-1.15,0,0],[-1.16,0,0]]),
+      pushQ(lLeg?lLeg.name:null,[0,1.5],[[-1.15,0,0],[-1.16,0,0]])
+    ]);
+    addClip('CrouchWalk', 0.9, [
+      pushQ(hipsName,[0,0.45,0.9],[[0.38,0,0],[0.4,0.04,0],[0.38,0,0]]),
+      pushQ(rUp?rUp.name:null,[0,0.45,0.9],[[0.7,0.05,0],[1.05,0.08,0],[0.7,0.05,0]]),
+      pushQ(lUp?lUp.name:null,[0,0.45,0.9],[[1.05,-0.05,0],[0.7,-0.08,0],[1.05,-0.05,0]]),
+      pushQ(rLeg?rLeg.name:null,[0,0.45,0.9],[[-0.95,0,0],[-1.25,0,0],[-0.95,0,0]]),
+      pushQ(lLeg?lLeg.name:null,[0,0.45,0.9],[[-1.25,0,0],[-0.95,0,0],[-1.25,0,0]])
+    ]);
+
+    // Jump squat → air tuck → land squash
+    addClip('JumpStart', 0.16, [
+      pushQ(hipsName,[0,0.08,0.16],[[0,0,0],[0.42,0,0],[-0.08,0,0]]),
+      pushQ(rUp?rUp.name:null,[0,0.08,0.16],[[0,0,0],[0.9,0.04,0],[-0.15,0,0]]),
+      pushQ(lUp?lUp.name:null,[0,0.08,0.16],[[0,0,0],[0.9,-0.04,0],[-0.15,0,0]]),
+      pushQ(rLeg?rLeg.name:null,[0,0.08,0.16],[[0,0,0],[-1.2,0,0],[0.2,0,0]]),
+      pushQ(lLeg?lLeg.name:null,[0,0.08,0.16],[[0,0,0],[-1.2,0,0],[0.2,0,0]])
+    ]);
+    addClip('InAir', 0.6, [
+      pushQ(hipsName,[0,0.6],[[-0.05,0,0],[-0.06,0,0]]),
+      pushQ(rUp?rUp.name:null,[0,0.6],[[0.45,0.08,0],[0.48,0.08,0]]),
+      pushQ(lUp?lUp.name:null,[0,0.6],[[0.45,-0.08,0],[0.48,-0.08,0]]),
+      pushQ(rLeg?rLeg.name:null,[0,0.6],[[-0.85,0,0],[-0.9,0,0]]),
+      pushQ(lLeg?lLeg.name:null,[0,0.6],[[-0.85,0,0],[-0.9,0,0]]),
+      pushQ(spineName,[0,0.6],[[0.08,0,0],[0.1,0,0]])
+    ]);
+    addClip('Fall', 0.8, [
+      pushQ(hipsName,[0,0.8],[[-0.12,0,0],[-0.14,0,0]]),
+      pushQ(rUp?rUp.name:null,[0,0.8],[[0.75,0.1,0],[0.8,0.12,0]]),
+      pushQ(lUp?lUp.name:null,[0,0.8],[[0.75,-0.1,0],[0.8,-0.12,0]]),
+      pushQ(rLeg?rLeg.name:null,[0,0.8],[[-1.15,0,0],[-1.25,0,0]]),
+      pushQ(lLeg?lLeg.name:null,[0,0.8],[[-1.15,0,0],[-1.25,0,0]]),
+      pushQ(spineName,[0,0.8],[[0.15,0,0],[0.18,0,0]]),
+      pushQ(rName,[0,0.8],[[0.6,0.2,-0.4],[0.65,0.25,-0.45]]),
+      pushQ(lName,[0,0.8],[[0.6,-0.2,0.4],[0.65,-0.25,0.45]])
+    ]);
+    addClip('LandLight', 0.28, [
+      pushQ(hipsName,[0,0.1,0.28],[[0,0,0],[0.32,0,0],[0.02,0,0]]),
+      pushQ(rUp?rUp.name:null,[0,0.1,0.28],[[0.2,0,0],[0.7,0.04,0],[0.05,0,0]]),
+      pushQ(lUp?lUp.name:null,[0,0.1,0.28],[[0.2,0,0],[0.7,-0.04,0],[0.05,0,0]]),
+      pushQ(rLeg?rLeg.name:null,[0,0.1,0.28],[[-0.3,0,0],[-1.0,0,0],[-0.05,0,0]]),
+      pushQ(lLeg?lLeg.name:null,[0,0.1,0.28],[[-0.3,0,0],[-1.0,0,0],[-0.05,0,0]])
+    ]);
+    addClip('LandHard', 0.45, [
+      pushQ(hipsName,[0,0.14,0.45],[[0,0,0],[0.55,0,0],[0.05,0,0]]),
+      pushQ(rUp?rUp.name:null,[0,0.14,0.45],[[0.3,0,0],[1.05,0.06,0],[0.08,0,0]]),
+      pushQ(lUp?lUp.name:null,[0,0.14,0.45],[[0.3,0,0],[1.05,-0.06,0],[0.08,0,0]]),
+      pushQ(rLeg?rLeg.name:null,[0,0.14,0.45],[[-0.4,0,0],[-1.35,0,0],[-0.1,0,0]]),
+      pushQ(lLeg?lLeg.name:null,[0,0.14,0.45],[[-0.4,0,0],[-1.35,0,0],[-0.1,0,0]]),
+      pushQ(spineName,[0,0.14,0.45],[[0.05,0,0],[0.35,0,0],[0.05,0,0]])
+    ]);
+
+    // Cover / lean
+    addClip('CoverIdle', 1.4, [
+      pushQ(spineName,[0,1.4],[[0.08,0.25,0.05],[0.09,0.26,0.05]]),
+      pushQ(hipsName,[0,1.4],[[0.08,0.12,0],[0.09,0.12,0]])
+    ]);
+    addClip('LeanL', 1.0, [
+      pushQ(spineName,[0,1.0],[[0.06,-0.38,0.12],[0.07,-0.4,0.12]]),
+      pushQ(hipsName,[0,1.0],[[0.05,-0.15,0],[0.05,-0.16,0]])
+    ]);
+    addClip('LeanR', 1.0, [
+      pushQ(spineName,[0,1.0],[[0.06,0.38,-0.12],[0.07,0.4,-0.12]]),
+      pushQ(hipsName,[0,1.0],[[0.05,0.15,0],[0.05,0.16,0]])
+    ]);
+
+    // Knife
+    addClip('KnifeIdle', 1.2, [
+      pushQ(rName,[0,1.2],[[0.55,-0.35,0.9],[0.58,-0.32,0.88]]),
+      pushQ(rFore?rFore.name:null,[0,1.2],[[0.4,0.1,0.2],[0.42,0.1,0.2]]),
+      pushQ(lName,[0,1.2],[[0.35,0.15,-0.25],[0.36,0.15,-0.25]])
+    ]);
+    addClip('KnifeSlash', 0.38, [
+      pushQ(rName,[0,0.08,0.2,0.38],[[0.55,-0.35,0.9],[0.3,-0.8,0.4],[0.9,0.6,-0.2],[0.55,-0.35,0.9]]),
+      pushQ(spineName,[0,0.08,0.2,0.38],[[0.05,0,0],[0.08,-0.15,0],[0.1,0.2,0],[0.05,0,0]])
+    ]);
+    addClip('KnifeStab', 0.32, [
+      pushQ(rName,[0,0.1,0.2,0.32],[[0.55,-0.35,0.9],[0.85,-0.2,0.5],[1.25,0.05,0.1],[0.55,-0.35,0.9]]),
+      pushQ(spineName,[0,0.1,0.2,0.32],[[0.05,0,0],[-0.05,0,0],[-0.12,0,0],[0.05,0,0]])
+    ]);
+
+    addClip('HitReact', 0.28, [
+      pushQ(spineName,[0,0.08,0.28],[[0.05,0,0],[-0.12,0.08,0.1],[0.05,0,0]]),
+      pushQ(hipsName,[0,0.08,0.28],[[0,0,0],[0.08,0.04,0],[0,0,0]])
+    ]);
+
     if(hips){
-      // Soft death tip only — no hips.position drop (that buries corpses under the floor)
-      clips.push(new THREE.AnimationClip('Death', 1.2, [
-        new THREE.QuaternionKeyframeTrack(hips.name+'.quaternion', [0,0.4,1.2], quatVals([
-          [0,0,0],
-          [0.35,0.1,0.2],
-          [0.55,0.05,0.35]
-        ]))
-      ]));
+      addClip('Death', 1.2, [
+        pushQ(hips.name,[0,0.4,1.2],[[0,0,0],[0.35,0.1,0.2],[0.55,0.05,0.35]])
+      ]);
     } else {
-      clips.push(new THREE.AnimationClip('Death', 1.0, [
-        new THREE.QuaternionKeyframeTrack('.quaternion', [0,0.5,1.0], quatVals([[0,0,0],[0.8,0,0.2],[1.1,0,0.15]]))
-      ]));
+      addClip('Death', 1.0, [
+        new THREE.QuaternionKeyframeTrack('.quaternion',[0,0.5,1.0],quatVals([[0,0,0],[0.8,0,0.2],[1.1,0,0.15]]))
+      ]);
     }
     return clips;
   }
 
+  /**
+   * Mixamo arm bones are mirrored: the SAME +X Euler swings left forward and right
+   * backward in world space. Carry quats must be calibrated in Mixamo local space
+   * (near Idle Z≈1.1 hang), not generic "pitch both arms forward" XYZ.
+   * Shoulders must be frozen too — Idle shoulder tracks otherwise swing the whole
+   * locked arm chain and spin the parented gun.
+   */
   const _carryQ = {
-    rArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(1.15, 0.12, -0.35, 'XYZ')),
-    lArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(1.05, -0.28, 0.42, 'XYZ')),
-    rFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.35, 0.05, 0.1, 'XYZ')),
-    lFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.55, -0.08, -0.05, 'XYZ')),
-    limpR: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, 0.05, -0.15, 'XYZ')),
-    limpL: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, -0.05, 0.15, 'XYZ'))
+    rifle:{
+      rShoulder: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 1.571, 'XYZ')),
+      lShoulder: new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI, 0, -1.571, 'XYZ')),
+      rArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.56, -0.84, 1.30, 'XYZ')),
+      lArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.64, 0.97, 1.38, 'XYZ')),
+      rFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.54, 0.10, 0.20, 'XYZ')),
+      lFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.40, -0.05, -0.10, 'XYZ')),
+      rHand: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.15, 0.05, 0.10, 'XYZ')),
+      lHand: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.10, -0.05, -0.08, 'XYZ'))
+    },
+    pistol:{
+      rShoulder: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 1.571, 'XYZ')),
+      lShoulder: new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI, 0, -1.571, 'XYZ')),
+      rArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.35, -0.55, 1.45, 'XYZ')),
+      lArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, 0.35, 1.15, 'XYZ')),
+      rFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.35, 0.05, 0.15, 'XYZ')),
+      lFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.45, -0.05, -0.08, 'XYZ')),
+      rHand: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.2, 0.0, 0.1, 'XYZ')),
+      lHand: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.05, 0, 0, 'XYZ'))
+    },
+    knife:{
+      rShoulder: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 1.571, 'XYZ')),
+      lShoulder: new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI, 0, -1.571, 'XYZ')),
+      rArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.15, -0.75, 1.55, 'XYZ')),
+      lArm: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.15, 0.25, 1.05, 'XYZ')),
+      rFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.55, 0.10, 0.25, 'XYZ')),
+      lFore: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, 0, 0, 'XYZ')),
+      rHand: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, 0.1, 0.15, 'XYZ')),
+      lHand: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.05, 0, 0, 'XYZ'))
+    },
+    limpR: new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.35, -0.05, 1.05, 'XYZ')),
+    limpL: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.05, -0.20, 1.10, 'XYZ'))
   };
   /** Cache Mixamo arm bones once — avoid traverse every frame. */
   function getCarryBones(model){
     if(!model) return null;
     const ud=model.userData||(model.userData={});
-    if(ud._carryBones) return ud._carryBones;
+    if(ud._carryBones && ud._carryBones.rShoulder) return ud._carryBones;
     ud._carryBones={
+      rShoulder:findBoneByNames(model,['mixamorig:RightShoulder','RightShoulder']),
+      lShoulder:findBoneByNames(model,['mixamorig:LeftShoulder','LeftShoulder']),
       rArm:findBoneByNames(model,['mixamorig:RightArm','RightArm']),
       lArm:findBoneByNames(model,['mixamorig:LeftArm','LeftArm']),
       rFore:findBoneByNames(model,['mixamorig:RightForeArm','RightForeArm']),
-      lFore:findBoneByNames(model,['mixamorig:LeftForeArm','LeftForeArm'])
+      lFore:findBoneByNames(model,['mixamorig:LeftForeArm','LeftForeArm']),
+      rHand:findBoneByNames(model,['mixamorig:RightHand','RightHand']),
+      lHand:findBoneByNames(model,['mixamorig:LeftHand','LeftHand'])
     };
     return ud._carryBones;
   }
+  function carryPoseForWeapon(weaponId){
+    const t=(WEAPONS[weaponId]&&WEAPONS[weaponId].type)||'rifle';
+    if(t==='melee'||weaponId==='knife') return _carryQ.knife;
+    if(t==='pistol') return _carryQ.pistol;
+    return _carryQ.rifle;
+  }
   /**
-   * Hard override Mixamo Walk/Idle/Aim bind arms with rifle carry.
-   * Soft slerp cannot fight mixer (AimIdle has no arm tracks → T-pose every frame).
+   * Hard override Mixamo Walk/Idle arm chain with a stable weapon carry.
+   * Order: shoulders → arms → forearms → hands (after mixer.update).
    */
-  function applyRifleCarryPose(model, dt, mode){
+  function applyRifleCarryPose(model, dt, mode, weaponId){
     if(!model) return;
-    const bones=getCarryBones(model);
-    if(!bones) return;
+    const target=(model.userData&&model.userData.model)||model;
+    const bones=getCarryBones(target)||getCarryBones(model);
+    if(!bones||(!bones.rArm&&!bones.lArm)) return;
     const limp=mode==='limp';
-    const tr=limp?_carryQ.limpR:_carryQ.rArm;
-    const tl=limp?_carryQ.limpL:_carryQ.lArm;
-    // Hard set for live carry (k=1). Soft blend only for corpse limp settle.
+    const pose=carryPoseForWeapon(weaponId)||_carryQ.rifle;
+    const tr=limp?_carryQ.limpR:(pose.rArm||_carryQ.rifle.rArm);
+    const tl=limp?_carryQ.limpL:(pose.lArm||_carryQ.rifle.lArm);
     if(limp){
       const k=Math.min(1, 1-Math.exp(-14*(dt||1/60)));
       if(bones.rArm) bones.rArm.quaternion.slerp(tr, k);
       if(bones.lArm) bones.lArm.quaternion.slerp(tl, k);
     } else {
+      if(bones.rShoulder&&pose.rShoulder) bones.rShoulder.quaternion.copy(pose.rShoulder);
+      if(bones.lShoulder&&pose.lShoulder) bones.lShoulder.quaternion.copy(pose.lShoulder);
       if(bones.rArm) bones.rArm.quaternion.copy(tr);
       if(bones.lArm) bones.lArm.quaternion.copy(tl);
-      if(bones.rFore) bones.rFore.quaternion.copy(_carryQ.rFore);
-      if(bones.lFore) bones.lFore.quaternion.copy(_carryQ.lFore);
+      if(bones.rFore&&pose.rFore) bones.rFore.quaternion.copy(pose.rFore);
+      if(bones.lFore&&pose.lFore) bones.lFore.quaternion.copy(pose.lFore);
+      if(bones.rHand&&pose.rHand) bones.rHand.quaternion.copy(pose.rHand);
+      if(bones.lHand&&pose.lHand) bones.lHand.quaternion.copy(pose.lHand);
     }
   }
   /** Keep tipped corpse resting on the floor (no underground clip). */
@@ -2706,8 +2850,8 @@ window.__cs3Booted = true;
       }
     }
     g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; }});
-    // Hand-socket rest pose (point barrel roughly +Z of character after bone attach)
-    g.rotation.set(-Math.PI*0.5, 0, Math.PI*0.05);
+    // Calibrated with frozen shoulders + rifle carry (barrel ≈ character forward)
+    g.rotation.set(-2.40, 0.89, 2.18);
     g.position.set(0, -0.02, 0.08);
     return g;
   }
@@ -2740,7 +2884,7 @@ window.__cs3Booted = true;
     this.actions={};
     this.state='idle';
     this.locked=false;
-    this._fade=0.2;
+    this._fade=0.18;
     const byName={};
     (gltfAnimations||[]).forEach(c=>{ if(c&&c.name) byName[c.name]=c; });
     makeSyntheticCombatClips(root).forEach(c=>{ byName[c.name]=c; });
@@ -2748,10 +2892,28 @@ window.__cs3Booted = true;
       idle:['Idle','idle'],
       walk:['Walk','walk'],
       run:['Run','run'],
+      crouchIdle:['CrouchIdle','crouchIdle'],
+      crouchWalk:['CrouchWalk','crouchWalk'],
+      jumpStart:['JumpStart'],
+      inAir:['InAir','Fall'],
+      fall:['Fall','InAir'],
+      landLight:['LandLight'],
+      landHard:['LandHard'],
+      coverIdle:['CoverIdle'],
+      leanL:['LeanL'],
+      leanR:['LeanR'],
       aim:['AimIdle','RifleIdle','Idle','idle'],
       shoot:['Shoot','Fire'],
       reload:['Reload'],
+      knifeIdle:['KnifeIdle'],
+      knifeSlash:['KnifeSlash'],
+      knifeStab:['KnifeStab'],
+      hitReact:['HitReact'],
       death:['Death','die']
+    };
+    const onceKeys={
+      shoot:1, reload:1, death:1, jumpStart:1, landLight:1, landHard:1,
+      knifeSlash:1, knifeStab:1, hitReact:1
     };
     Object.keys(map).forEach(key=>{
       let clip=null;
@@ -2760,7 +2922,7 @@ window.__cs3Booted = true;
       }
       if(!clip) return;
       const action=this.mixer.clipAction(clip);
-      if(key==='shoot'||key==='reload'||key==='death'){
+      if(onceKeys[key]){
         action.setLoop(THREE.LoopOnce, 1);
         action.clampWhenFinished=true;
       }
@@ -2769,16 +2931,25 @@ window.__cs3Booted = true;
     const self=this;
     this._onFinished=function(e){
       const name=e.action&&e.action.getClip()?e.action.getClip().name:'';
-      if(name==='Shoot'||name==='Fire'){
-        self.locked=false;
-        self.setState(self._afterShoot||'aim');
-      } else if(name==='Reload'){
-        self.locked=false;
-        self.setState(self._afterReload||'idle');
-      } else if(name==='Death'||name==='die'){
+      const afterMap={
+        Shoot:'shoot', Fire:'shoot', Reload:'reload',
+        JumpStart:'jumpStart', LandLight:'landLight', LandHard:'landHard',
+        KnifeSlash:'knifeSlash', KnifeStab:'knifeStab', HitReact:'hitReact'
+      };
+      if(name==='Death'||name==='die'){
         self.locked=true;
         if(self.onDeathEnd) self.onDeathEnd();
+        return;
       }
+      const key=afterMap[name];
+      if(!key) return;
+      self.locked=false;
+      if(key==='shoot') self.setState(self._afterShoot||'aim');
+      else if(key==='reload') self.setState(self._afterReload||'idle');
+      else if(key==='jumpStart') self.setState(self._afterJump||'inAir');
+      else if(key==='landLight'||key==='landHard') self.setState(self._afterLand||'idle');
+      else if(key==='knifeSlash'||key==='knifeStab') self.setState(self._afterKnife||'knifeIdle');
+      else if(key==='hitReact') self.setState(self._afterHit||'idle');
     };
     this.mixer.addEventListener('finished', this._onFinished);
     if(this.actions.idle){
@@ -2789,14 +2960,23 @@ window.__cs3Booted = true;
   CharacterAnim.prototype.setState=function(state){
     if(this.locked && state!=='death') return;
     if(state===this.state) return;
-    if(!this.actions[state]) state='idle';
+    if(!this.actions[state]){
+      // graceful fallbacks
+      if(state==='crouchWalk'&&this.actions.crouchIdle) state='crouchIdle';
+      else if(state==='crouchIdle'&&this.actions.idle) state='idle';
+      else if(state==='fall'&&this.actions.inAir) state='inAir';
+      else if(state==='inAir'&&this.actions.fall) state='fall';
+      else if(state==='knifeIdle'&&this.actions.idle) state='idle';
+      else if(state==='coverIdle'&&this.actions.aim) state='aim';
+      else if((state==='leanL'||state==='leanR')&&this.actions.coverIdle) state='coverIdle';
+      else state='idle';
+    }
     if(!this.actions[state]) return;
     const prev=this.actions[this.state];
     const next=this.actions[state];
     if(prev&&prev!==next) prev.fadeOut(this._fade);
-    // Hard-clear combat poses when returning to idle so arms don't keep flapping
     if(state==='idle'){
-      ['aim','shoot','reload','walk','run'].forEach(k=>{
+      ['aim','shoot','reload','walk','run','crouchIdle','crouchWalk','coverIdle','leanL','leanR','knifeIdle'].forEach(k=>{
         const a=this.actions[k];
         if(a){ a.fadeOut(0.12); a.setEffectiveTimeScale(1); }
       });
@@ -2804,19 +2984,19 @@ window.__cs3Booted = true;
     next.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).fadeIn(this._fade).play();
     this.state=state;
   };
-  /** Match walk/run clip speed to actual |v| so feet don't skate. */
+  /** Match walk/run/crouchWalk clip speed to actual |v| so feet don't skate. */
   CharacterAnim.prototype.setLocomotion=function(state, speed){
-    if(state!=='walk'&&state!=='run'){ this.setState(state); return; }
+    const loco=['walk','run','crouchWalk'];
+    if(loco.indexOf(state)<0){ this.setState(state); return; }
     const prev=this.state;
     this.setState(state);
     const a=this.actions[this.state];
     if(!a) return;
-    const ref=state==='run'?5.4:2.7;
+    const ref=state==='run'?5.4:(state==='crouchWalk'?1.6:2.7);
     const ts=Math.max(0.55, Math.min(1.4, (speed||0)/ref));
     a.setEffectiveTimeScale(ts);
-    // restore default scale when leaving loco later
-    if(prev!=='walk'&&prev!=='run'){
-      ['idle','aim'].forEach(k=>{ const x=this.actions[k]; if(x) x.setEffectiveTimeScale(1); });
+    if(loco.indexOf(prev)<0){
+      ['idle','aim','crouchIdle'].forEach(k=>{ const x=this.actions[k]; if(x) x.setEffectiveTimeScale(1); });
     }
   };
   CharacterAnim.prototype.playOneShot=function(name, afterState){
@@ -2824,6 +3004,7 @@ window.__cs3Booted = true;
     if(!action) return false;
     if(name==='death'){
       this.locked=true;
+      this._lockUntil=0;
       Object.keys(this.actions).forEach(k=>{ if(k!=='death'&&this.actions[k]) this.actions[k].fadeOut(0.1); });
       action.reset().fadeIn(0.08).play();
       this.state='death';
@@ -2831,16 +3012,36 @@ window.__cs3Booted = true;
     }
     if(this.locked) return false;
     this.locked=true;
-    if(name==='shoot') this._afterShoot=afterState||(this.state==='walk'||this.state==='run'?this.state:'aim');
+    const clip=action.getClip();
+    const dur=(clip&&clip.duration)?clip.duration:0.35;
+    this._lockUntil=performance.now()+dur*1000+80;
+    if(name==='shoot') this._afterShoot=afterState||(this.state==='walk'||this.state==='run'||this.state==='crouchWalk'?this.state:'idle');
     if(name==='reload') this._afterReload=afterState||'idle';
+    if(name==='jumpStart') this._afterJump=afterState||'inAir';
+    if(name==='landLight'||name==='landHard') this._afterLand=afterState||'idle';
+    if(name==='knifeSlash'||name==='knifeStab') this._afterKnife=afterState||'knifeIdle';
+    if(name==='hitReact') this._afterHit=afterState||this.state||'idle';
     const prev=this.actions[this.state];
     if(prev&&prev!==action) prev.fadeOut(0.08);
-    action.reset().fadeIn(0.06).play();
+    action.reset().setEffectiveWeight(1).fadeIn(0.06).play();
     this.state=name;
     return true;
   };
   CharacterAnim.prototype.update=function(dt){
     if(this.mixer) this.mixer.update(dt);
+    // Wall-clock unlock — finished events are unreliable with synthetic clips
+    if(this.locked && this.state!=='death' && this._lockUntil && performance.now()>=this._lockUntil){
+      const st=this.state;
+      this.locked=false;
+      this._lockUntil=0;
+      if(st==='shoot') this.setState(this._afterShoot||'idle');
+      else if(st==='reload') this.setState(this._afterReload||'idle');
+      else if(st==='jumpStart') this.setState(this._afterJump||'inAir');
+      else if(st==='landLight'||st==='landHard') this.setState(this._afterLand||'idle');
+      else if(st==='knifeSlash'||st==='knifeStab') this.setState(this._afterKnife||'knifeIdle');
+      else if(st==='hitReact') this.setState(this._afterHit||'idle');
+      else this.setState('idle');
+    }
   };
   CharacterAnim.prototype.resetToIdle=function(){
     this.locked=false;
@@ -3516,6 +3717,9 @@ window.__cs3Booted = true;
             this.anim.setState('idle');
           }
         }
+        if(this.agent && this.currentShowWeapon!=='knife'){
+          applyRifleCarryPose(this.agent, dt, 'carry', this.currentShowWeapon||'ak');
+        }
         inspect=(cycle>4.5&&cycle<6.0)?0.35:0;
       } else {
         // procedural fallback breathe + inspect
@@ -3565,6 +3769,7 @@ window.__cs3Booted = true;
     mapOpen:false,
     tracers:[],particles:[],weaponMesh:null,weaponMag:null,keys:{},pointerLocked:false,yaw:0,pitch:0,recoilPitch:0,
     shootCooldown:0,reloading:false,reloadTimer:0,reloadAnim:0,weaponKick:0,weaponKickRot:0,weaponBob:0,
+    weaponLagYaw:0,weaponLagPitch:0,landDip:0,jumpSquash:0,knifeSwing:0,knifeMode:0,precisionAim:false,
     currentWeapon:'ak',ammo:{},kills:0,deaths:0,botKills:{},muzzleFlash:null,animId:null,waypoints:[],
     sites:{A:null,B:null},ctSpawns:[],tSpawns:[],sandMat:null,groundMat:null,
     bomb:{planted:false,pos:null,mesh:null,timer:0,plantProgress:0,defuseProgress:0,carrier:null,site:null},
@@ -4622,6 +4827,7 @@ window.__cs3Booted = true;
     resetMatch(){
       this.kills=0;this.deaths=0;this.botKills={};this.yaw=0;this.pitch=0;this.recoilPitch=0;
       this.shootCooldown=0;this.reloading=false;this.reloadAnim=0;this.weaponKick=0;this.weaponKickRot=0;
+      this.weaponLagYaw=0;this.weaponLagPitch=0;this.landDip=0;this.jumpSquash=0;this.knifeSwing=0;this.knifeMode=0;this.precisionAim=false;
       this.keys={};this.mouseDown=false;this.tracers=[];this.particles=[];
       this.ads=false;this.shake=0;this.xhBloom=0;this.matchOver=false;this.footTimer=0;this.bombTick=0;
       this.paused=false;this.crouching=false;this.sprayIndex=0;this.sprayTimer=0;
@@ -4749,7 +4955,8 @@ window.__cs3Booted = true;
         hasBomb:false,plantTarget:Math.random()<0.5?'A':'B',plantProgress:0,
         facing:team==='CT'?0:Math.PI,
         walkPhase:Math.random()*Math.PI*2,moving:false,
-        vel:new THREE.Vector3(),
+        vel:new THREE.Vector3(), onGround:true, crouching:false,
+        wantJump:false, wantCrouch:false, leanSide:null, jumpFlash:0,
         loadout, weapon:loadout.primary, weaponClass:'rifle',
         skill, aimHold:0, strafeDir:(Math.random()<0.5?1:-1), strafeT:0,
         memory:null, memoryT:0, coverT:0, engageT:0};
@@ -4988,8 +5195,13 @@ window.__cs3Booted = true;
       }
       if(!this.pointerLocked||this.killCam)return;
       if(e.button===0){this.mouseDown=true;this.tryShoot(true);}
-      // RMB = toggle ADS (better for MacBook trackpad than hold)
-      if(e.button===2){e.preventDefault();this.toggleAds();}
+      // RMB: knife stab · AWP ADS · else precision hip-aim
+      if(e.button===2){
+        e.preventDefault();
+        if(this.currentWeapon==='knife'){ this.meleeAttack(true); return; }
+        if(this.currentWeapon==='awp'||this.loadout.primary==='awp'){ this.toggleAds(); return; }
+        this.setPrecisionAim(!this.precisionAim);
+      }
     },
     onMouseUp(e){
       if(e.button===0)this.mouseDown=false;
@@ -4999,9 +5211,17 @@ window.__cs3Booted = true;
       if(this.currentWeapon!=='awp') this.switchWeapon('awp');
       this.setAds(!this.ads);
     },
+    setPrecisionAim(on){
+      if(this.currentWeapon==='knife'||this.currentWeapon==='awp'||this.reloading||!this.player||!this.player.alive){
+        this.precisionAim=false; return;
+      }
+      this.precisionAim=!!on;
+      if(this.precisionAim) this.setAds(false);
+    },
     setAds(on){
       if(this.currentWeapon!=='awp'||!this.player||!this.player.alive||this.reloading){on=false;}
       this.ads=!!on;
+      if(this.ads) this.precisionAim=false;
       const scope=document.getElementById('scopeOverlay');
       const xh=document.getElementById('crosshair');
       if(this.ads){
@@ -5017,11 +5237,14 @@ window.__cs3Booted = true;
       if(!id||this.currentWeapon===id)return;
       if(!this.ownsWeapon(id)){toast('Нет этого оружия');return;}
       this.setAds(false);
+      this.precisionAim=false;
+      this.knifeSwing=0; this.knifeMode=0;
       this.currentWeapon=id;this.reloading=false;this.reloadAnim=0;this.sprayIndex=0;this.applyEquippedSkins();AudioFX.beep(300,.04,'triangle',.04);
     },
 
     startReload(){
       this.setAds(false);
+      this.precisionAim=false;
       const w=WEAPONS[this.currentWeapon];
       if(w.type==='melee'||this.reloading||!this.player.alive)return;
       const a=this.ammo[this.currentWeapon];
@@ -5040,7 +5263,7 @@ window.__cs3Booted = true;
       if(!this.player.alive||this.reloading||this.shootCooldown>0||this.round.freeze>0||this.buyOpen||this.matchOver||this.paused||this.killCam)return;
       const w=WEAPONS[this.currentWeapon];
       if(!w.automatic&&!isClick)return;
-      if(w.type==='melee'){this.meleeAttack();this.shootCooldown=w.fireRate/1000;return;}
+      if(w.type==='melee'){this.meleeAttack(false);this.shootCooldown=w.fireRate/1000;return;}
       const a=this.ammo[this.currentWeapon];
       if(!a){AudioFX.empty();return;}
       if(a.mag<=0){if(a.reserve>0)this.startReload();else AudioFX.empty();return;}
@@ -5051,8 +5274,8 @@ window.__cs3Booted = true;
       const [sx,sy]=pattern[shot];
       this.sprayIndex=Math.min((pattern.length-1), this.sprayIndex+1);
       this.sprayTimer=0.22;
-      const sprayScale=0.012*(this.ads?0.35:1)*(this.crouching?0.7:1);
-      this.recoilPitch+=w.recoil*0.018*(this.ads?0.55:1)+sy*sprayScale*0.35;
+      const sprayScale=0.012*(this.ads?0.35:(this.precisionAim?0.55:1))*(this.crouching?0.7:1);
+      this.recoilPitch+=w.recoil*0.018*(this.ads?0.55:(this.precisionAim?0.75:1))+sy*sprayScale*0.35;
       this.weaponKick=0.16+w.recoil*0.07;
       this.weaponKickRot=0.2+w.recoil*0.08;
       this.shake=Math.min(0.45, this.shake+0.08+w.recoil*0.028);
@@ -5067,7 +5290,7 @@ window.__cs3Booted = true;
       const baseDir=new THREE.Vector3(0,0,-1).applyQuaternion(this.camera.quaternion);
       const moveBloom=(this.player.vel&&Math.hypot(this.player.vel.x,this.player.vel.z)>1)?0.008:0;
       const crouchMul=this.crouching?0.5:1;
-      const spreadMul=this.ads?0.12:1;
+      const spreadMul=this.ads?0.12:(this.precisionAim?0.45:1);
       // Long maps need real long-range hits (DM / bomb / duo)
       const range = w.type==='sniper' ? 480 : (w.type==='shotgun'?70:(w.type==='smg'?280:(w.type==='pistol'?300:380)));
       const pellets = w.type==='shotgun' ? (w.pellets||8) : 1;
@@ -5204,11 +5427,29 @@ window.__cs3Booted = true;
         if(p.life<=0){this.scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();this.particles.splice(i,1);}
       }
     },
-    meleeAttack(){
-      AudioFX.shoot('knife');this.weaponKick=0.14;this.weaponKickRot=0.2;
+    meleeAttack(isStab){
+      if(this.knifeSwing>0.05) return;
+      AudioFX.shoot('knife');
+      this.knifeMode=isStab?1:0;
+      this.knifeSwing=1;
+      this.weaponKick=isStab?0.1:0.16;
+      this.weaponKickRot=isStab?0.12:0.28;
+      // Hitframe mid-swing
       const origin=this.camera.getWorldPosition(new THREE.Vector3());
       const dir=new THREE.Vector3(0,0,-1).applyQuaternion(this.camera.quaternion);
-      const hit=this.raycastBots(origin,dir,WEAPONS.knife.range);if(hit)this.damageBot(hit.bot,WEAPONS.knife.damage,hit.head);
+      const range=WEAPONS.knife.range*(isStab?0.92:1.05);
+      const hit=this.raycastBots(origin,dir,range);
+      if(hit){
+        let dmg=WEAPONS.knife.damage*(isStab?1.15:1);
+        // Backstab if facing same way as bot (hit from behind)
+        const bf=hit.bot.facing!=null?hit.bot.facing:hit.bot.mesh.rotation.y;
+        const toBot=Math.atan2(hit.bot.mesh.position.x-origin.x, hit.bot.mesh.position.z-origin.z);
+        let dd=toBot-bf;
+        while(dd>Math.PI) dd-=Math.PI*2;
+        while(dd<-Math.PI) dd+=Math.PI*2;
+        if(Math.abs(dd)<0.75) dmg*=1.5;
+        this.damageBot(hit.bot, dmg, hit.head);
+      }
     },
     spawnTracer(from,dir,len){
       const L=len||60;
@@ -5225,11 +5466,12 @@ window.__cs3Booted = true;
         }
         // Capsule check: generous hit volumes so long-range shots still register
         const base=bot.mesh.position;
+        const crouchMul=bot.crouching?0.72:1;
         const points=[
-          {p:new THREE.Vector3(base.x, base.y+1.55, base.z), r:0.42, head:true},
-          {p:new THREE.Vector3(base.x, base.y+1.25, base.z), r:0.62, head:false},
-          {p:new THREE.Vector3(base.x, base.y+0.85, base.z), r:0.58, head:false},
-          {p:new THREE.Vector3(base.x, base.y+0.45, base.z), r:0.48, head:false}
+          {p:new THREE.Vector3(base.x, base.y+1.55*crouchMul, base.z), r:0.42, head:true},
+          {p:new THREE.Vector3(base.x, base.y+1.25*crouchMul, base.z), r:0.62, head:false},
+          {p:new THREE.Vector3(base.x, base.y+0.85*crouchMul, base.z), r:0.58, head:false},
+          {p:new THREE.Vector3(base.x, base.y+0.45*crouchMul, base.z), r:0.48, head:false}
         ];
         for(const pt of points){
           const to=pt.p.clone().sub(origin);const t=to.dot(dir);
@@ -5300,6 +5542,10 @@ window.__cs3Booted = true;
       bot.hp-=hs?dmg*2.2:dmg;bot.lastHurt=performance.now();bot.state='chase';bot.reaction=0.2;
       this.showHitmarker();AudioFX.hit(!!hs);
       bot.mesh.traverse(o=>{if(o.isMesh&&o.material&&o.material.emissive){o.material.emissive.setHex(hs?0x663311:0x441111);setTimeout(()=>{if(o.material)o.material.emissive.setHex(0);},80);}});
+      const anim=bot.mesh&&bot.mesh.userData&&bot.mesh.userData.anim;
+      if(anim && bot.alive && bot.hp>0 && !anim.locked && Math.random()<0.55){
+        anim.playOneShot('hitReact', anim.state==='walk'||anim.state==='run'||anim.state==='crouchWalk'?anim.state:'idle');
+      }
       if(bot.hp<=0)this.killBot(bot);
     },
     killBot(bot, opts){
@@ -5321,18 +5567,24 @@ window.__cs3Booted = true;
       if(bot.hasBomb&&!this.bomb.planted){bot.hasBomb=false;const other=this.bots.find(b=>b.team==='T'&&b.alive);if(other){other.hasBomb=true;this.bomb.carrier=other;other.plantTarget=bot.plantTarget;}}
       if(MODES[this.mode].bomb&&!this.round.over)this.checkRoundEnd();
       const anim=bot.mesh&&bot.mesh.userData&&bot.mesh.userData.anim;
-      // Linger on the ground long enough to read the corpse (DM)
       bot.respawnAt=performance.now()+9000;
       bot.fallSettled=false;
-      bot.fallPitch=Math.PI*0.5;
-      bot.fallRoll=0.45*((Math.random()<0.5?1:-1));
+      // Directional tip away from killer / player
+      let hx=0, hz=0;
+      if(byPlayer && this.player){ hx=bot.mesh.position.x-this.player.pos.x; hz=bot.mesh.position.z-this.player.pos.z; }
+      else if(opts&&opts.killer&&opts.killer.mesh){
+        hx=bot.mesh.position.x-opts.killer.mesh.position.x;
+        hz=bot.mesh.position.z-opts.killer.mesh.position.z;
+      }
+      const hlen=Math.hypot(hx,hz)||1;
+      const awayX=hx/hlen, awayZ=hz/hlen;
+      bot.fallAxis=awayX>=0?1:-1;
+      bot.fallPitch=Math.PI*0.48+Math.random()*0.12;
+      bot.fallRoll=0.4*bot.fallAxis+awayZ*0.2;
+      bot.fallYaw=(bot.facing!=null?bot.facing:bot.mesh.rotation.y)+Math.atan2(awayX,awayZ)*0.2;
       if(bot.mesh){
-        bot.fallAxis=(Math.random()<0.5?1:-1);
-        bot.fallRoll=0.45*bot.fallAxis;
-        bot.fallYaw=bot.facing!=null?bot.facing:bot.mesh.rotation.y;
         bot.mesh.visible=true;
         bot.mesh.rotation.order='YXZ';
-        // Death flash so kill is obvious
         bot.mesh.traverse(o=>{
           if(o.isMesh&&o.material&&o.material.emissive){
             o.material.emissive.setHex(0x661100);
@@ -5343,10 +5595,7 @@ window.__cs3Booted = true;
         if(gun) gun.visible=true;
       }
       if(anim){
-        // Stop loco/aim — procedural tip is the fall; skip Death hips clip
-        ['idle','walk','run','aim','shoot','reload','death'].forEach(k=>{
-          const a=anim.actions[k]; if(a) a.stop();
-        });
+        Object.keys(anim.actions||{}).forEach(k=>{ const a=anim.actions[k]; if(a) a.stop(); });
         anim.locked=false;
         if(anim.mixer) anim.mixer.stopAllAction();
       }
@@ -5356,6 +5605,7 @@ window.__cs3Booted = true;
       const wp=this.waypoints[Math.floor(Math.random()*this.waypoints.length)].clone();
       bot.mesh.position.set(wp.x,0,wp.z);bot.mesh.visible=true;bot.hp=100;bot.alive=true;bot.state='patrol';
       bot.falling=false; bot.fallT=0; bot.fallSettled=false;
+      bot.onGround=true; bot.crouching=false; bot.vel.set(0,0,0);
       bot.mesh.rotation.order='YXZ';
       bot.mesh.rotation.set(0, bot.team==='CT'?0:Math.PI, 0);
       bot.facing=bot.mesh.rotation.y;
@@ -5631,20 +5881,77 @@ window.__cs3Booted = true;
       bot.facing=cur;
       bot.mesh.rotation.set(0,cur,0);
     },
-    /** Body faces walk direction; optional head glance toward aim. */
-    updateBotBodyAim(bot, aimX, aimZ, dt, speedNow){
+    /** Body faces walk direction; head glances toward aim when standing/fighting. */
+    updateBotBodyAim(bot, aimX, aimZ, dt, speedNow, aimY){
       const moving=speedNow>0.55;
       if(moving){
-        // Real people orient torso with footsteps first
         this.turnBotToward(bot, bot.mesh.position.x+bot.vel.x, bot.mesh.position.z+bot.vel.z, dt, MOVE.turnRate);
       } else if(aimX!=null && aimZ!=null){
         this.turnBotToward(bot, aimX, aimZ, dt, MOVE.aimTurnRate);
       }
-      // Don't fight mixer with manual head.rotation during loco
       const head=bot.mesh.userData&&bot.mesh.userData.head;
-      if(head && !moving){
-        head.rotation.y += (0 - head.rotation.y)*Math.min(1, dt*6);
-        head.rotation.x += (0 - head.rotation.x)*Math.min(1, dt*6);
+      if(!head) return;
+      if(aimX!=null && aimZ!=null && !moving){
+        const hx=bot.mesh.position.x, hz=bot.mesh.position.z;
+        const hy=bot.mesh.position.y+(bot.crouching?1.05:1.45);
+        const dx=aimX-hx, dz=aimZ-hz;
+        const dy=(aimY!=null?aimY:hy)-hy;
+        const yawWorld=Math.atan2(dx,dz);
+        let dyaw=yawWorld-(bot.facing||0);
+        while(dyaw>Math.PI) dyaw-=Math.PI*2;
+        while(dyaw<-Math.PI) dyaw+=Math.PI*2;
+        const ty=Math.max(-0.55, Math.min(0.55, dyaw));
+        const tp=Math.max(-0.4, Math.min(0.35, -Math.atan2(dy, Math.hypot(dx,dz))));
+        head.rotation.y += (ty - head.rotation.y)*Math.min(1, dt*7);
+        head.rotation.x += (tp - head.rotation.x)*Math.min(1, dt*7);
+      } else {
+        head.rotation.y += (0 - head.rotation.y)*Math.min(1, dt*5);
+        head.rotation.x += (0 - head.rotation.x)*Math.min(1, dt*5);
+      }
+    },
+
+    /** Pick cover lean side from nearest prop between bot and aim. */
+    botCoverLean(bot, aimX, aimZ){
+      if(aimX==null||!this.colliders||!this.colliders.length) return null;
+      const px=bot.mesh.position.x, pz=bot.mesh.position.z;
+      const adx=aimX-px, adz=aimZ-pz;
+      const ad2=adx*adx+adz*adz;
+      if(ad2<4) return null;
+      let best=null, bestD=4.2;
+      for(const c of this.colliders){
+        if(c.maxY-c.minY>2.2) continue; // walls too tall
+        if(c.maxY<0.45) continue;
+        const cx=(c.minX+c.maxX)*0.5, cz=(c.minZ+c.maxZ)*0.5;
+        const d=Math.hypot(cx-px, cz-pz);
+        if(d>bestD||d<0.6) continue;
+        // cover roughly between bot and target
+        const toC=(cx-px)*adx+(cz-pz)*adz;
+        if(toC<0.2*ad2) continue;
+        best=c; bestD=d;
+      }
+      if(!best) return null;
+      const cx=(best.minX+best.maxX)*0.5, cz=(best.minZ+best.maxZ)*0.5;
+      const side=adx*(cz-pz)-adz*(cx-px);
+      return side>=0?'leanL':'leanR';
+    },
+
+    /** Low prop ahead → crouch duck; open gap with tall blocker → jump. */
+    botLocomotionAids(bot, wish, wishSpeed){
+      bot.wantCrouch=false;
+      bot.wantJump=false;
+      if(!wish||wish.lengthSq()<0.0001||wishSpeed<0.5||!this.colliders) return;
+      const px=bot.mesh.position.x, pz=bot.mesh.position.z;
+      const fx=wish.x, fz=wish.z;
+      const probe=1.35;
+      const tx=px+fx*probe, tz=pz+fz*probe;
+      for(const c of this.colliders){
+        const nx=Math.max(c.minX,Math.min(tx,c.maxX));
+        const nz=Math.max(c.minZ,Math.min(tz,c.maxZ));
+        const d2=(tx-nx)*(tx-nx)+(tz-nz)*(tz-nz);
+        if(d2>MOVE.radius*MOVE.radius*1.2) continue;
+        const h=c.maxY-c.minY;
+        if(h>0.35 && h<1.05 && c.maxY<1.15) bot.wantCrouch=true;
+        if(h>=1.05 && h<1.55 && bot.onGround!==false && Math.random()<0.012) bot.wantJump=true;
       }
     },
 
@@ -5713,7 +6020,7 @@ window.__cs3Booted = true;
             const roll=bot.fallRoll!=null?bot.fallRoll:0.45*(bot.fallAxis||1);
             bot.mesh.rotation.order='YXZ';
             bot.mesh.rotation.set(ease*pitch, yaw, ease*roll);
-            applyRifleCarryPose(bot.mesh, dt, t>0.45?'limp':'carry');
+            applyRifleCarryPose(bot.mesh, dt, t>0.45?'limp':'carry', bot.weapon);
             snapCorpseToGround(bot.mesh);
             if(t>=1 && !bot.fallSettled){
               bot.fallSettled=true;
@@ -5762,8 +6069,8 @@ window.__cs3Booted = true;
             if(myTeam!=='ffa'&&e.team===myTeam)return;
           }
           const d=pos.distanceTo(e.mesh.position);
-          const eye=pos.clone(); eye.y+=1.45;
-          const tEye=e.mesh.position.clone(); tEye.y+=1.4;
+          const eye=pos.clone(); eye.y=pos.y+(bot.crouching?1.05:1.45);
+          const tEye=e.mesh.position.clone(); tEye.y=e.mesh.position.y+(e.crouching?1.05:1.4);
           const see=d<82&&this.canSee(eye,tEye);
           if(see && d<combatDist){
             combatDist=d; targetBot=e; targetPos=e.mesh.position.clone(); hasLOS=true;
@@ -5781,7 +6088,7 @@ window.__cs3Booted = true;
         if(!isFriend || myTeam==='ffa' || this.mode==='dm'){
           if(this.player.alive){
             const d=pos.distanceTo(this.player.pos);
-            const eye=pos.clone(); eye.y+=1.45;
+            const eye=pos.clone(); eye.y=pos.y+(bot.crouching?1.05:1.45);
             const see=d<82&&this.canSee(eye,this.player.pos.clone());
             if(see && d<=combatDist+0.5){
               combatDist=d; targetBot=null; targetPos=this.player.pos.clone(); shootPlayer=true; hasLOS=true;
@@ -5906,24 +6213,61 @@ window.__cs3Booted = true;
         if(distToMove>0 && distToMove<MOVE.arriveDist){
           wishSpeed*=Math.max(0.2, distToMove/MOVE.arriveDist);
         }
-        if(this.round.freeze>0){ wish.set(0,0,0); wishSpeed=0; }
-        this.applyGroundFriction(bot.vel, dt);
+        this.botLocomotionAids(bot, wish, wishSpeed);
+        bot.crouching=!!(bot.wantCrouch || (bot.coverT>0 && bot.state==='attack' && hasLOS && combatDist<18 && Math.random()<0.002));
+        if(bot.crouching) wishSpeed*=MOVE.crouchMul;
+        if(this.round.freeze>0){ wish.set(0,0,0); wishSpeed=0; bot.wantJump=false; }
+
+        if(bot.onGround==null) bot.onGround=true;
+        if(bot.vel.y==null) bot.vel.y=0;
+        const wasGrounded=!!bot.onGround;
+        if(bot.onGround) this.applyGroundFriction(bot.vel, dt);
         if(wish.lengthSq()>0.0001 && wishSpeed>0){
-          this.accelerateXZ(bot.vel, wish, wishSpeed, MOVE.groundAccel, dt);
+          this.accelerateXZ(bot.vel, wish, wishSpeed, bot.onGround?MOVE.groundAccel:MOVE.airAccel, dt);
         }
-        const next=pos.clone(); next.x+=bot.vel.x*dt; next.z+=bot.vel.z*dt; next.y=0;
-        this.resolveCollision(next, MOVE.radius, bot.vel, this.capsuleBodyY(0));
-        pos.x=next.x; pos.z=next.z;
+        // Jump (gap / short obstacle)
+        if(bot.wantJump && bot.onGround && this.round.freeze<=0){
+          bot.vel.y=MOVE.jumpVel;
+          bot.onGround=false;
+          bot.jumpFlash=0.16;
+          const ja=bot.mesh.userData&&bot.mesh.userData.anim;
+          if(ja && !ja.locked) ja.playOneShot('jumpStart','inAir');
+        }
+        bot.vel.y-=MOVE.gravity*dt;
+        const next=pos.clone();
+        next.x+=bot.vel.x*dt; next.z+=bot.vel.z*dt;
+        const feetY=Math.max(0, pos.y);
+        const bodyY=this.capsuleBodyY(feetY)-(bot.crouching?0.25:0);
+        this.resolveCollision(next, MOVE.radius, bot.vel, bodyY);
+        next.y+=bot.vel.y*dt;
+        if(bot.onGround){
+          next.y=0;
+          bot.vel.y=0;
+        } else if(next.y<=0){
+          const impactVy=Math.abs(bot.vel.y);
+          next.y=0; bot.vel.y=0; bot.onGround=true;
+          if(!wasGrounded){
+            if(impactVy>=MOVE.landDampVy){
+              bot.vel.x*=MOVE.landDamp; bot.vel.z*=MOVE.landDamp;
+              const ja=bot.mesh.userData&&bot.mesh.userData.anim;
+              if(ja && !ja.locked) ja.playOneShot('landHard', bot.crouching?'crouchIdle':'idle');
+            } else {
+              const ja=bot.mesh.userData&&bot.mesh.userData.anim;
+              if(ja && !ja.locked) ja.playOneShot('landLight', bot.crouching?'crouchIdle':'idle');
+            }
+          }
+        }
+        pos.x=next.x; pos.z=next.z; pos.y=next.y;
         const speedNow=Math.hypot(bot.vel.x, bot.vel.z);
-        bot.moving=speedNow>0.45;
+        bot.moving=speedNow>0.45 && bot.onGround;
         if(bot.moving) bot.walkPhase=(bot.walkPhase||0)+dt*speedNow*0.85;
 
-        let aimX=null, aimZ=null;
+        let aimX=null, aimZ=null, aimY=null;
         if(hasLOS && (shootPlayer||targetBot)){
           const look=shootPlayer?this.player.pos:(targetBot.mesh.position);
-          aimX=look.x; aimZ=look.z;
+          aimX=look.x; aimZ=look.z; aimY=shootPlayer?look.y:(look.y+1.4);
         }
-        this.updateBotBodyAim(bot, aimX, aimZ, dt, speedNow);
+        this.updateBotBodyAim(bot, aimX, aimZ, dt, speedNow, aimY);
 
         // close-range knife swap (CS-style)
         if(bot.state==='attack' && combatDist>0 && combatDist<2.4 && bot.weapon!=='knife'){
@@ -5934,40 +6278,52 @@ window.__cs3Booted = true;
 
         const anim=bot.mesh.userData&&bot.mesh.userData.anim;
         const wType=(WEAPONS[bot.weapon]&&WEAPONS[bot.weapon].type)||'rifle';
+        const leanSide=(bot.coverT>0 && hasLOS)?this.botCoverLean(bot, aimX, aimZ):null;
+        bot.leanSide=leanSide;
         if(anim){
           anim.update(dt);
           if(bot.alive && !anim.locked){
-            if(bot.moving){
-              // Speed-matched loco; peek never sprints (human caution)
+            if(!bot.onGround){
+              const airState=(bot.vel.y<-3.5)?'fall':'inAir';
+              anim.setState(airState);
+            } else if(bot.moving){
               const peeking=bot.state==='attack' && hasLOS;
-              const loco=(!peeking && speedNow>4.0)?'run':'walk';
-              anim.setLocomotion(loco, speedNow);
-            } else {
-              // Prefer Idle (not spine-only AimIdle) — AimIdle bind = T-pose arms
-              // Rifle hold comes from hard applyRifleCarryPose below
-              if(hasLOS && (bot.state==='attack' || (bot.engageT||0)>0.15) && wType!=='melee'){
-                anim.setState('aim'); // spine lean only; arms hard-overridden
-              } else {
-                anim.setState('idle');
+              if(bot.crouching) anim.setLocomotion('crouchWalk', speedNow);
+              else {
+                const loco=(!peeking && speedNow>4.0)?'run':'walk';
+                anim.setLocomotion(loco, speedNow);
               }
-              const head=bot.mesh.userData.head;
-              if(head){ head.rotation.x*=Math.max(0,1-8*dt); head.rotation.y*=Math.max(0,1-8*dt); head.rotation.z*=Math.max(0,1-8*dt); }
+            } else if(wType==='melee'||bot.weapon==='knife'){
+              anim.setState('knifeIdle');
+            } else if(leanSide){
+              anim.setState(leanSide);
+            } else if(bot.coverT>0.2 && hasLOS){
+              anim.setState('coverIdle');
+            } else if(bot.crouching){
+              anim.setState('crouchIdle');
+            } else if(hasLOS && (bot.state==='attack' || (bot.engageT||0)>0.15) && wType!=='melee'){
+              // Keep Idle under aim so legs aren't bind/T-pose (AimIdle is spine-only)
+              anim.setState('idle');
+            } else {
+              anim.setState('idle');
             }
           }
-          // Hard rifle carry after mixer — must beat AimIdle/Idle arm tracks
+          // Carry pose after mixer (skip knife — knifeIdle/slash owns arms)
           if(bot.alive && wType!=='melee' && bot.weapon!=='knife'){
-            applyRifleCarryPose(bot.mesh, dt, 'carry');
+            applyRifleCarryPose(bot.mesh, dt, 'carry', bot.weapon);
+          } else if(bot.alive && (wType==='melee'||bot.weapon==='knife') && anim.state==='knifeIdle'){
+            applyRifleCarryPose(bot.mesh, dt, 'carry', 'knife');
           }
         } else {
           const L=bot.mesh.userData.limbs;
           if(L){
             if(bot.moving){
-              const swing=Math.sin(bot.walkPhase)*0.55;
+              const swing=Math.sin(bot.walkPhase)*0.55*(bot.crouching?0.55:1);
               L.leftLeg.rotation.x=swing; L.rightLeg.rotation.x=-swing;
               L.leftArm.rotation.x=-swing*0.55; L.rightArm.rotation.x=0.35+swing*0.25;
               L.torsoG.rotation.y=Math.sin(bot.walkPhase*0.5)*0.04;
+              if(L.torsoG) L.torsoG.position.y=bot.crouching?-0.25:0;
             } else {
-              // Stop: arms hang calm at sides — no idle waving
               L.leftLeg.rotation.x*=Math.max(0,1-10*dt);
               L.rightLeg.rotation.x*=Math.max(0,1-10*dt);
               L.leftArm.rotation.x += (0.15 - L.leftArm.rotation.x)*Math.min(1,dt*8);
@@ -5975,6 +6331,7 @@ window.__cs3Booted = true;
               L.leftArm.rotation.z += (0.05 - (L.leftArm.rotation.z||0))*Math.min(1,dt*8);
               L.rightArm.rotation.z += (-0.05 - (L.rightArm.rotation.z||0))*Math.min(1,dt*8);
               L.torsoG.rotation.y*=Math.max(0,1-8*dt);
+              if(L.torsoG) L.torsoG.position.y += ((bot.crouching?-0.25:0) - L.torsoG.position.y)*Math.min(1,dt*10);
             }
             L.headG.rotation.x=bot.state==='attack'?-0.08:0;
           }
@@ -5983,7 +6340,7 @@ window.__cs3Booted = true;
         // --- shooting (same damage as before) ---
         if(this.round.freeze>0||bot.shootCd>0)continue;
         if(bot.blindUntil && performance.now()<bot.blindUntil) continue;
-        const eye=pos.clone();eye.y+=1.45;
+        const eye=pos.clone();eye.y=pos.y+(bot.crouching?1.05:1.45);
         const bw=WEAPONS[bot.weapon]||WEAPONS.ak;
         const maxRange=bw.type==='melee'?(bw.range||2.4):75;
 
@@ -5996,7 +6353,10 @@ window.__cs3Booted = true;
           const fireCd=bw.type==='melee'?0.55:((0.55+Math.random()*0.5)*(1.25-skill*0.15));
           bot.shootCd=fireCd;
           bot.engageT=0.8;
-          if(anim) anim.playOneShot('shoot', wType==='melee'?'idle':'aim');
+          if(anim){
+            if(bw.type==='melee') anim.playOneShot(Math.random()<0.45?'knifeStab':'knifeSlash','knifeIdle');
+            else anim.playOneShot('shoot', wType==='melee'?'idle':'aim');
+          }
           const acc=bw.type==='melee'?0.85:Math.max(0.1,(0.18+skill*0.28)*(1-dist/85));
           const from=eye.clone();
           const dir=aimPos.clone().sub(from).normalize();
@@ -6013,7 +6373,18 @@ window.__cs3Booted = true;
           bot._shots=(bot._shots||0)+1;
           if(anim && bw.type!=='melee' && bot._shots>=12+Math.floor(Math.random()*8)){
             bot._shots=0;
-            setTimeout(()=>{ if(bot.alive&&bot.mesh&&bot.mesh.userData.anim) bot.mesh.userData.anim.playOneShot('reload'); }, 120);
+            setTimeout(()=>{
+              if(!bot.alive||!bot.mesh||!bot.mesh.userData.anim) return;
+              const a=bot.mesh.userData.anim;
+              const act=a.actions.reload;
+              if(act){
+                const clip=act.getClip();
+                const dur=(clip&&clip.duration)||2.2;
+                const need=(WEAPONS[bot.weapon]&&WEAPONS[bot.weapon].reloadTime)||2.2;
+                act.setEffectiveTimeScale(dur/Math.max(0.4,need));
+              }
+              a.playOneShot('reload', bot.crouching?'crouchIdle':'aim');
+            }, 120);
           }
           return true;
         };
@@ -6132,14 +6503,18 @@ window.__cs3Booted = true;
         this.accelerateXZ(this.player.vel, wish, wishSpeed, onGround?MOVE.groundAccel:MOVE.airAccel, dt);
       }
 
-      // Edge-triggered jump (allows crouch-jump like CS)
+      // Edge-triggered jump (allows crouch-jump like CS) + squat anticipation
       const spaceDown=!!(this.keys['Space']);
       const jumpEdge=spaceDown && !this.jumpHeld;
       this.jumpHeld=spaceDown;
       if(jumpEdge && this.player.onGround && canSteer){
+        this.jumpSquash=1;
         this.player.vel.y=MOVE.jumpVel;
         this.player.onGround=false;
       }
+      this.jumpSquash=Math.max(0,(this.jumpSquash||0)-dt*6);
+      this.landDip=Math.max(0,(this.landDip||0)-dt*4.5);
+      this.knifeSwing=Math.max(0,(this.knifeSwing||0)-dt*3.2);
 
       this.player.vel.y-=MOVE.gravity*dt;
       const next=this.player.pos.clone();
@@ -6163,16 +6538,21 @@ window.__cs3Booted = true;
           this.player.eyeH=eyeTarget;
           this.player.vel.y=0;
           this.player.onGround=true;
+          this.landDip=Math.min(1, 0.25+impactVy*0.12);
           // Absorb horizontal only on hard landings (keeps light bhop carry)
           if(!wasGrounded && impactVy>=MOVE.landDampVy){
             this.player.vel.x*=MOVE.landDamp;
             this.player.vel.z*=MOVE.landDamp;
+            this.landDip=Math.min(1.2, 0.55+impactVy*0.1);
           }
         }
       }
       this.player.pos.copy(next);
 
+      // Camera with crouch / land / jump squash dips
+      const camDip=(this.landDip||0)*0.08+(this.jumpSquash||0)*0.05+(this.crouching?0.02:0);
       this.camera.position.copy(this.player.pos);
+      this.camera.position.y-=camDip;
       if(this.shake>0){
         if(save.settings.shake!==false){
           this.camera.position.x+=(Math.random()-0.5)*this.shake*0.35;
@@ -6182,46 +6562,92 @@ window.__cs3Booted = true;
       }
       this.camera.rotation.order='YXZ';this.camera.rotation.y=this.yaw;this.camera.rotation.x=this.pitch-this.recoilPitch;
 
+      // Weapon lag (attention) — spring toward look
+      if(this.weaponLagYaw==null) this.weaponLagYaw=this.yaw;
+      if(this.weaponLagPitch==null) this.weaponLagPitch=this.pitch;
+      const lagK=Math.min(1, dt*14);
+      this.weaponLagYaw += (this.yaw-this.weaponLagYaw)*lagK;
+      this.weaponLagPitch += (this.pitch-this.weaponLagPitch)*lagK;
+      let lagYaw=this.yaw-this.weaponLagYaw;
+      let lagPitch=this.pitch-this.weaponLagPitch;
+      while(lagYaw>Math.PI) lagYaw-=Math.PI*2;
+      while(lagYaw<-Math.PI) lagYaw+=Math.PI*2;
+      lagYaw=Math.max(-0.12, Math.min(0.12, lagYaw));
+      lagPitch=Math.max(-0.08, Math.min(0.08, lagPitch));
+
       // footsteps + crosshair bloom decay (by actual speed)
       const moveSp=Math.hypot(this.player.vel.x,this.player.vel.z);
       const movingNow=moveSp>0.6&&this.player.onGround&&!frozen&&!this.buyOpen;
       if(movingNow){
         this.xhBloom=Math.min(1,this.xhBloom+dt*0.8);
         this.footTimer=(this.footTimer||0)+dt;
-        const stepEvery=moveSp<3.8?0.52:0.34;
+        const stepEvery=this.crouching?0.62:(moveSp<3.8?0.52:0.34);
         if(this.footTimer>=stepEvery){this.footTimer=0;AudioFX.foot();}
       } else {
         this.xhBloom=Math.max(0,this.xhBloom-dt*1.6);
       }
       applyCrosshair(false, this.xhBloom);
 
-      // Weapon viewmodel — strong reload animation
+      // Weapon viewmodel — gait bob, jump/land, reload phases, knife arcs, lag
       if(this.weaponMesh){
         const moving=moveSp>0.6&&this.player.onGround&&!frozen;
+        const walking=(this.keys['ShiftLeft']||this.keys['ShiftRight']);
         const bobAmt=(save.settings.weaponBob!==undefined?save.settings.weaponBob:1);
-        this.weaponBob+=dt*(moving?11:2);
-        const bobY=moving?Math.sin(this.weaponBob)*0.012*bobAmt:0;
-        const bobX=moving?Math.cos(this.weaponBob*0.5)*0.008*bobAmt:0;
-        let rx= -this.weaponKickRot, ry=0, rz=0;
-        // Visible FPS viewmodel: gun + short gloves in lower-right
+        const bobSpd=this.crouching?7:(walking?8.5:(moving?12:2));
+        const bobScale=this.crouching?0.55:(walking?0.7:1);
+        const airMul=this.player.onGround?1:0.25;
+        this.weaponBob+=dt*bobSpd;
+        const bobY=moving?Math.sin(this.weaponBob)*0.012*bobAmt*bobScale*airMul:0;
+        const bobX=moving?Math.cos(this.weaponBob*0.5)*0.008*bobAmt*bobScale*airMul:0;
+        let rx= -this.weaponKickRot - lagPitch*0.35, ry= -lagYaw*0.55, rz= lagYaw*0.25;
         let px=0.18+bobX, py=-0.12+bobY+this.weaponKick*0.15, pz=-0.18+this.weaponKick;
+        py -= (this.landDip||0)*0.06 + (this.jumpSquash||0)*0.04;
+        if(this.crouching){ py-=0.03; rz+=0.04; }
+        if(this.precisionAim && !this.ads){
+          px=0.08; py=-0.1; pz=-0.28;
+          rx-=0.05; ry+=0.02;
+        }
         if(this.ads){
-          px=0.02; py=-0.42; pz=0.15; // tuck under scope
+          px=0.02; py=-0.42; pz=0.15;
           this.weaponMesh.visible=false;
         } else {
           this.weaponMesh.visible=true;
         }
+        // Knife slash / stab arcs
+        if(this.currentWeapon==='knife' && (this.knifeSwing||0)>0){
+          const t=1-this.knifeSwing;
+          const wave=Math.sin(Math.min(1,t*1.15)*Math.PI);
+          if(this.knifeMode===1){
+            // stab forward
+            pz -= wave*0.22;
+            py += wave*0.04;
+            rx -= wave*0.35;
+          } else {
+            // slash horizontal
+            ry += (t<0.5?-1:1)*wave*0.85;
+            rz += wave*0.55;
+            px += wave*0.1;
+            rx += wave*0.2;
+          }
+        }
         if(this.reloading){
           const t=this.reloadAnim;
-          const wave=Math.sin(t*Math.PI);
-          rx += 0.35 + wave*1.1;
-          ry += Math.sin(t*Math.PI*2)*0.15;
-          rz += wave*0.55;
-          px += wave*0.12;
-          py -= 0.08 + wave*0.22;
-          pz += 0.05 + wave*0.18;
+          // Phases: tilt → mag out → mag in → seat
+          const tilt=t<0.2?(t/0.2):1;
+          const seat=t>0.85?((t-0.85)/0.15):0;
+          const wave=Math.sin(Math.min(1,Math.max(0,(t-0.15)/0.7))*Math.PI);
+          rx += 0.25*tilt + wave*0.95 - seat*0.15;
+          ry += Math.sin(t*Math.PI*2)*0.12*(1-seat);
+          rz += wave*0.5;
+          px += wave*0.1;
+          py -= 0.06 + wave*0.2;
+          pz += 0.04 + wave*0.16;
           if(this.weaponMag){
-            const magOut = t<0.45 ? (t/0.45) : (t>0.65 ? Math.max(0,(1-t)/0.35) : 1);
+            let magOut=0;
+            if(t<0.2) magOut=0;
+            else if(t<0.45) magOut=(t-0.2)/0.25;
+            else if(t<0.7) magOut=1;
+            else magOut=Math.max(0,1-(t-0.7)/0.25);
             const b=this.weaponMagBase||{x:0.26,y:-0.36,z:-0.5,rx:0,ry:0,rz:0};
             this.weaponMag.position.set(b.x+magOut*0.08, b.y-magOut*0.55, b.z);
             this.weaponMag.rotation.set(b.rx+magOut*1.2, b.ry, b.rz+magOut*0.4);
@@ -6499,9 +6925,14 @@ window.__cs3Booted = true;
         this.renderer.render(this.scene,this.camera);
         return;
       }
+      // Always tick bots/round while match runs (anim mixer needs update even without pointer lock)
+      if(!this.matchOver){
+        this.updateRound(dt);
+        this.updateBots(dt);
+        this.updateBomb(dt);
+      }
       if(this.pointerLocked || this.buyOpen || this.killCam || (this.spectate&&this.player&&!this.player.alive)){
-        this.updateRound(dt);this.updatePlayer(dt);
-        if(!this.matchOver){ this.updateBots(dt); this.updateBomb(dt); }
+        this.updatePlayer(dt);
         this.updateProjectiles(dt);
         this.updateHUD();
       } else if(this.player){
@@ -6510,11 +6941,13 @@ window.__cs3Booted = true;
           this.camera.position.copy(this.player.pos);
           this.camera.rotation.order='YXZ';this.camera.rotation.y=this.yaw;this.camera.rotation.x=this.pitch-this.recoilPitch;
         }
+        this.updateHUD();
       }
       this.updateTracers(dt);this.updateParticles(dt);this.renderer.render(this.scene,this.camera);
     }
   };
 
+  window.Game = Game;
   window.__boot = 'tail';
   refreshProfile();renderInventory();renderCases();applyCrosshair(false);applyHudPrefs();updateLobbySummary();
   preloadArt(()=>{
