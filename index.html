@@ -3086,6 +3086,75 @@ window.__cs3Booted = true;
     if(this.actions.idle){ this.actions.idle.fadeIn(0.05).play(); this.state='idle'; }
   };
 
+  const CharacterMaps={ ct:null, t:null, nml:null, ready:false, _loading:false, _waiters:[] };
+  function loadCharacterMaps(done){
+    if(CharacterMaps.ready){ if(done) done(); return; }
+    if(CharacterMaps._loading){ CharacterMaps._waiters.push(done); return; }
+    CharacterMaps._loading=true; CharacterMaps._waiters=done?[done]:[];
+    const loader=new THREE.TextureLoader();
+    let left=3;
+    const finish=()=>{
+      if(--left>0) return;
+      CharacterMaps.ready=true; CharacterMaps._loading=false;
+      const w=CharacterMaps._waiters; CharacterMaps._waiters=[];
+      w.forEach(fn=>{ if(fn) fn(); });
+    };
+    const load=(key, url, srgb)=>{
+      loader.load(url, tex=>{
+        tex.flipY=false; // match GLTFLoader convention for this Mixamo atlas
+        tex.anisotropy=8;
+        if(srgb && THREE.SRGBColorSpace) tex.colorSpace=THREE.SRGBColorSpace;
+        tex.needsUpdate=true;
+        CharacterMaps[key]=tex;
+        finish();
+      }, undefined, ()=>{ CharacterMaps[key]=null; finish(); });
+    };
+    load('ct','assets/characters/ct-body.png?v=cs2b', true);
+    load('t','assets/characters/t-body.png?v=cs2b', true);
+    load('nml','assets/characters/vanguard-nml.jpg?v=cs2b', false);
+  }
+  function applyCs2CharacterLook(model, team){
+    const isCT=team==='CT';
+    const albedo=isCT?CharacterMaps.ct:CharacterMaps.t;
+    const nml=CharacterMaps.nml;
+    const hooked=AssetHooks.getCharacterMaterial&&AssetHooks.getCharacterMaterial(team, 'body');
+    model.traverse(o=>{
+      if(!o.isMesh) return;
+      o.castShadow=true; o.receiveShadow=true;
+      o.frustumCulled=false;
+      if(/visor/i.test(o.name||'')){
+        if(!isCT){ o.visible=false; return; }
+        o.material=new THREE.MeshPhysicalMaterial({
+          color:0x1c2e18, metalness:0.88, roughness:0.08,
+          transparent:true, opacity:0.78, envMapIntensity:1.6,
+          clearcoat:1, clearcoatRoughness:0.06
+        });
+        return;
+      }
+      if(hooked){ o.material=hooked; return; }
+      if(albedo){
+        o.material=new THREE.MeshStandardMaterial({
+          map:albedo, normalMap:nml||null,
+          color:0xffffff,
+          roughness:isCT?0.66:0.78,
+          metalness:isCT?0.10:0.05,
+          envMapIntensity:0.72
+        });
+        if(nml) o.material.normalScale=new THREE.Vector2(0.85, 0.85);
+      } else if(o.material){
+        const tint=new THREE.Color(isCT?0x2a3a4c:0xb8a888);
+        const mats=Array.isArray(o.material)?o.material:[o.material];
+        const cloned=mats.map(m=>{
+          const c=m.clone();
+          if(c.color) c.color.lerp(tint, 0.42);
+          if(c.emissive) c.emissive.setHex(0x000000);
+          return c;
+        });
+        o.material=Array.isArray(o.material)?cloned:cloned[0];
+      }
+    });
+  }
+
   const CharacterAssets = {
     ready:false, gltf:null, failed:false,
     load(done){
@@ -3094,9 +3163,12 @@ window.__cs3Booted = true;
       this._loading=true; this._waiters=done?[done]:[];
       const loader=new GLTFLoader();
       loader.load('assets/models/Soldier.glb', (gltf)=>{
-        this.gltf=gltf; this.ready=true; this._loading=false;
-        const w=this._waiters; this._waiters=[];
-        w.forEach(fn=>{ if(fn) fn(true); });
+        this.gltf=gltf;
+        loadCharacterMaps(()=>{
+          this.ready=true; this._loading=false;
+          const w=this._waiters; this._waiters=[];
+          w.forEach(fn=>{ if(fn) fn(true); });
+        });
       }, undefined, (err)=>{
         console.warn('Character GLB load failed', err);
         this.failed=true; this._loading=false;
@@ -3125,24 +3197,7 @@ window.__cs3Booted = true;
         model.position.y=-box2.min.y;
       }
       root.add(model);
-      const tintHex=team==='CT'?0x5a7aa0:0x9a7a48;
-      const tint=new THREE.Color(tintHex);
-      model.traverse(o=>{
-        if(!o.isMesh) return;
-        o.castShadow=true; o.receiveShadow=true;
-        o.frustumCulled=false;
-        if(o.material){
-          const mats=Array.isArray(o.material)?o.material:[o.material];
-          const cloned=mats.map(m=>{
-            const c=m.clone();
-            if(c.color) c.color.lerp(tint, team==='CT'?0.28:0.32);
-            if(c.emissive) c.emissive.setHex(0x000000);
-            c.side=THREE.FrontSide;
-            return c;
-          });
-          o.material=Array.isArray(o.material)?cloned:cloned[0];
-        }
-      });
+      applyCs2CharacterLook(model, team||'T');
       const rightHand=findBoneByNames(model,['mixamorig:RightHand','mixamorigRightHand','RightHand']);
       let gun=null;
       if(opts.includeGun!==false){
@@ -3523,12 +3578,12 @@ window.__cs3Booted = true;
       this.camera.position.set(0.55, 1.55, 3.35);
       this.camera.lookAt(0.05, 1.2, 0);
       this.clock=new THREE.Clock();
-      this.scene.add(new THREE.HemisphereLight(0xffe8d8, 0x121820, 0.62));
-      const key=new THREE.DirectionalLight(0xfff4e8, 1.55); key.position.set(2.4,4.5,3.4); key.castShadow=true;
+      this.scene.add(new THREE.HemisphereLight(0xffe8d8, 0x121820, 0.85));
+      const key=new THREE.DirectionalLight(0xfff4e8, 1.85); key.position.set(2.4,4.5,3.4); key.castShadow=true;
       key.shadow.mapSize.set(2048,2048); key.shadow.camera.near=0.5; key.shadow.camera.far=12;
       key.shadow.camera.left=-2; key.shadow.camera.right=2; key.shadow.camera.top=3; key.shadow.camera.bottom=-1;
       this.scene.add(key);
-      const fill=new THREE.DirectionalLight(0x6a90c0, 0.55); fill.position.set(-3.4,2.4,-1.6); this.scene.add(fill);
+      const fill=new THREE.DirectionalLight(0x8aa8c8, 0.85); fill.position.set(-3.4,2.4,-1.6); this.scene.add(fill);
       const rim=new THREE.PointLight(0xf0a020, 1.05, 12); rim.position.set(-1.5,2.0,1.9); this.scene.add(rim);
       const kick=new THREE.PointLight(0x88b4ff, 0.45, 8); kick.position.set(1.2,1.0,2.2); this.scene.add(kick);
       // soft backdrop
