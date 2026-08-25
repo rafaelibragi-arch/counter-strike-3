@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="MoveConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/move_config.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+run_speed = 6.0
+walk_speed = 3.12
+crouch_mul = 0.34
+ground_accel = 5.5
+air_accel = 12.0
+friction = 5.2
+stop_speed = 1.92
+jump_vel = 7.25
+gravity = 19.2
+air_wish_cap = 0.72
+max_velocity = 84.0
+step_height = 0.45
+capsule_radius = 0.4
+standing_height = 1.8
+crouch_height = 1.15
+eye_standing = 1.7
+eye_crouch = 0.95
+jump_buffer = 0.03125
+autobhop = false
+mouse_sensitivity = 0.0022
+max_pitch = 1.45

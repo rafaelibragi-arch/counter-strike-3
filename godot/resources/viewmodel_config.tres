@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="ViewModelConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/fp/viewmodel_config.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+offset_x = 0.18
+offset_y = -0.12
+offset_z = -0.18
+scale = 1.0
+bob_amount = 1.0
+bob_y_amp = 0.012
+bob_x_amp = 0.008
+run_bob_speed = 11.5
+walk_bob_speed = 8.2
+crouch_bob_speed = 6.2
+crouch_bob_scale = 0.42
+walk_bob_scale = 0.62
+kick_decay = 8.0
+kick_rot_decay = 7.0
+kick_pos_mul = 0.15
+ads_rifle_fov = 70.0
+ads_sniper_fov = 45.0
+ads_lerp_speed = 12.0
+precision_offset = Vector3(0.08, -0.1, -0.28)
+sniper_ads_offset = Vector3(0.02, -0.42, 0.15)
+draw_time = 0.35
+holster_z = 0.4
+holster_rot = 0.8
+viewmodel_layer = 2
+world_layer = 1
+muzzle_flash_frames = 0.06
+shell_eject_quality_min = 1

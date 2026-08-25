@@ -1,0 +1,105 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_menu"]
+[ext_resource type="Script" path="res://scripts/fp/viewmodel_inspect.gd" id="2_inspect"]
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_menu")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.07, 0.09, 1)
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Center"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Center/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 42
+text = "CLASHPOINT"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Center/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Year 1 — Training Grounds"
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="Center/VBox"]
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+
+[node name="BtnTraining" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(280, 36)
+layout_mode = 2
+text = "Play Training"
+
+[node name="BtnCasual" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(280, 36)
+layout_mode = 2
+text = "Play Casual Bots"
+
+[node name="BtnDM" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(280, 36)
+layout_mode = 2
+text = "Play DM"
+
+[node name="BtnRanked" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(280, 36)
+layout_mode = 2
+text = "Ranked"
+
+[node name="BtnLan" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(280, 36)
+layout_mode = 2
+text = "Host LAN (stub)"
+
+[node name="BtnSettings" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(280, 36)
+layout_mode = 2
+text = "Settings"
+
+[node name="BtnQuit" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(280, 36)
+layout_mode = 2
+text = "Quit"
+
+[node name="StatusLabel" type="Label" parent="Center/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = ""
+horizontal_alignment = 1
+
+[node name="WeaponInspect" type="SubViewportContainer" parent="Center/VBox"]
+custom_minimum_size = Vector2(280, 120)
+layout_mode = 2
+stretch = true
+script = ExtResource("2_inspect")
+
+[connection signal="pressed" from="Center/VBox/BtnTraining" to="." method="_on_training_pressed"]
+[connection signal="pressed" from="Center/VBox/BtnCasual" to="." method="_on_casual_pressed"]
+[connection signal="pressed" from="Center/VBox/BtnDM" to="." method="_on_dm_pressed"]
+[connection signal="pressed" from="Center/VBox/BtnRanked" to="." method="_on_ranked_pressed"]
+[connection signal="pressed" from="Center/VBox/BtnLan" to="." method="_on_lan_pressed"]
+[connection signal="pressed" from="Center/VBox/BtnSettings" to="." method="_on_settings_pressed"]
+[connection signal="pressed" from="Center/VBox/BtnQuit" to="." method="_on_quit_pressed"]

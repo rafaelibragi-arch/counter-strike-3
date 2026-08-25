@@ -1,0 +1,12 @@
+# Godot
+.godot/
+*.translation
+export/*.apk
+export/*.aab
+export/*.zip
+export/web/
+export/Clashpoint.app/
+
+# Local Godot editor binary (download via tools/)
+../tools/Godot.app/
+../tools/godot.zip

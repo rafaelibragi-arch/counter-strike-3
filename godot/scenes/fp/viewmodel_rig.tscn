@@ -1,0 +1,8 @@
+[gd_scene load_steps=3 format=3 uid="uid://clashpoint_viewmodel_rig"]
+
+[ext_resource type="Script" path="res://scripts/fp/viewmodel_controller.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/viewmodel_config.tres" id="2"]
+
+[node name="ViewModelRig" type="Node3D"]
+script = ExtResource("1")
+config = ExtResource("2")
